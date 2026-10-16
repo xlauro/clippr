@@ -23,6 +23,7 @@
                 <Region HBox.hgrow="ALWAYS" />
                 <Label fx:id="dbStatusBadge" text="● PostgreSQL: Conectando..." style="-fx-font-size: 12px; -fx-text-fill: -color-warning-fg;" />
                 <Label fx:id="ffmpegStatusBadge" text="● FFmpeg: OK" style="-fx-font-size: 12px; -fx-text-fill: -color-success-fg;" />
+                <Label fx:id="geminiStatusBadge" text="● Gemini: Verificando..." style="-fx-font-size: 12px; -fx-text-fill: -color-warning-fg;" />
             </HBox>
             <Separator />
         </VBox>
@@ -169,8 +170,9 @@
                         <HBox spacing="10.0">
                             <PasswordField fx:id="geminiApiKeyField" promptText="Cole sua chave GEMINI_API_KEY aqui" HBox.hgrow="ALWAYS" />
                             <Button text="Salvar Chave" onAction="#onSaveApiKey" styleClass="accent" />
+                            <Button text="🔍 Buscar no Ambiente" onAction="#onDetectApiKey" />
                         </HBox>
-                        <Label text="A chave pode ser configurada aqui ou via variável de ambiente GEMINI_API_KEY." style="-fx-text-fill: -color-fg-muted; -fx-font-size: 11px;" />
+                        <Label fx:id="geminiApiKeyStatusLabel" text="A chave pode ser configurada aqui ou detectada automaticamente de GEMINI_API_KEY (.zshrc, .bashrc, env)." style="-fx-text-fill: -color-fg-muted; -fx-font-size: 11px;" />
                     </VBox>
 
                     <VBox spacing="8.0">
@@ -195,6 +197,10 @@
 
                             <Label text="yt-dlp:" GridPane.columnIndex="0" GridPane.rowIndex="2" />
                             <Label fx:id="diagYtDlpLabel" text="Verificando..." GridPane.columnIndex="1" GridPane.rowIndex="2" />
+
+                            <Label text="Gemini AI (API Key):" GridPane.columnIndex="0" GridPane.rowIndex="3" />
+                            <Label fx:id="diagGeminiLabel" text="Verificando..." GridPane.columnIndex="1" GridPane.rowIndex="3" />
+                            <Button text="Detectar do Ambiente" onAction="#onDetectApiKey" GridPane.columnIndex="2" GridPane.rowIndex="3" />
                         </GridPane>
                     </VBox>
                 </VBox>

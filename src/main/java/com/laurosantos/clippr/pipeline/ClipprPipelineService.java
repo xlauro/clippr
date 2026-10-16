@@ -100,7 +100,7 @@ public class ClipprPipelineService {
                 // 2. Avaliação de Viralização via Gemini 3.8 Flash
                 String apiKey = settings.geminiApiKey();
                 if (apiKey == null || apiKey.isBlank()) {
-                    apiKey = System.getenv().getOrDefault("GEMINI_API_KEY", "");
+                    apiKey = com.laurosantos.clippr.ai.GeminiApiKeyResolver.resolveApiKey();
                 }
 
                 if (apiKey.isBlank()) {

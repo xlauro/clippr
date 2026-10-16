@@ -1,5 +1,6 @@
 package com.laurosantos.clippr.ui;
 
+import com.laurosantos.clippr.ai.GeminiApiKeyResolver;
 import com.laurosantos.clippr.domain.AppSettings;
 import com.laurosantos.clippr.domain.ClipCandidate;
 import com.laurosantos.clippr.domain.OrientationMode;
@@ -45,9 +46,11 @@ public class MainController {
 
     @FXML private Label dbStatusBadge;
     @FXML private Label ffmpegStatusBadge;
+    @FXML private Label geminiStatusBadge;
     @FXML private Label diagPostgresLabel;
     @FXML private Label diagFfmpegLabel;
     @FXML private Label diagYtDlpLabel;
+    @FXML private Label diagGeminiLabel;
 
     @FXML private TabPane tabPane;
     @FXML private TextField linkInputField;
@@ -82,6 +85,7 @@ public class MainController {
     @FXML private Label lblEndSeconds;
 
     @FXML private PasswordField geminiApiKeyField;
+    @FXML private Label geminiApiKeyStatusLabel;
     @FXML private TextField outputDirField;
 
     @FXML private Label statusLabel;
@@ -559,12 +563,53 @@ public class MainController {
     private void loadSettings() {
         Thread.ofVirtual().start(() -> {
             AppSettings settings = db.getSettings();
+            String currentKey = settings.geminiApiKey();
+            GeminiApiKeyResolver.ResolutionResult autoResolution = null;
+
+            if (currentKey == null || currentKey.isBlank()) {
+                autoResolution = GeminiApiKeyResolver.resolveWithDetails();
+                if (autoResolution.isFound()) {
+                    currentKey = autoResolution.key();
+                    AppSettings updated = new AppSettings(
+                            settings.outputDirectory(),
+                            settings.minViralityScore(),
+                            settings.autoProcessAboveThreshold(),
+                            settings.defaultOrientation(),
+                            settings.autoVerticalMaxDurationSeconds(),
+                            settings.burnSubtitles(),
+                            settings.cpuThreads(),
+                            currentKey,
+                            settings.geminiModel()
+                    );
+                    db.saveSettings(updated);
+                    logMessage("Chave GEMINI_API_KEY detectada automaticamente em [" + autoResolution.source() + "] e configurada.", false);
+                }
+            }
+
+            final String finalKey = currentKey;
+            final GeminiApiKeyResolver.ResolutionResult finalResolution = autoResolution;
+
             Platform.runLater(() -> {
                 outputDirField.setText(settings.outputDirectory());
-                geminiApiKeyField.setText(settings.geminiApiKey());
+                geminiApiKeyField.setText(finalKey != null ? finalKey : "");
                 chkSubtitles.setSelected(settings.burnSubtitles());
                 chkAutoProcess.setSelected(settings.autoProcessAboveThreshold());
                 comboOrientation.setValue(settings.defaultOrientation());
+
+                if (geminiApiKeyStatusLabel != null) {
+                    if (finalResolution != null && finalResolution.isFound()) {
+                        geminiApiKeyStatusLabel.setText("Chave detectada automaticamente de: " + finalResolution.source());
+                        geminiApiKeyStatusLabel.setStyle("-fx-text-fill: -color-success-fg; -fx-font-size: 11px;");
+                    } else if (finalKey != null && !finalKey.isBlank()) {
+                        geminiApiKeyStatusLabel.setText("Chave configurada e pronta para uso.");
+                        geminiApiKeyStatusLabel.setStyle("-fx-text-fill: -color-success-fg; -fx-font-size: 11px;");
+                    } else {
+                        geminiApiKeyStatusLabel.setText("Nenhuma chave configurada. Cole-a acima ou clique em 'Buscar no Ambiente'.");
+                        geminiApiKeyStatusLabel.setStyle("-fx-text-fill: -color-fg-muted; -fx-font-size: 11px;");
+                    }
+                }
+
+                checkEnvironmentDiagnostics();
             });
         });
     }
@@ -650,6 +695,16 @@ public class MainController {
             Path ytdlpPath = ytdlp.getBinaryPath();
             boolean ytdlpOk = Files.isExecutable(ytdlpPath);
 
+            String apiKey = geminiApiKeyField != null ? geminiApiKeyField.getText() : null;
+            if (apiKey == null || apiKey.isBlank()) {
+                apiKey = db.getSettings().geminiApiKey();
+            }
+            if (apiKey == null || apiKey.isBlank()) {
+                apiKey = GeminiApiKeyResolver.resolveApiKey();
+            }
+            boolean geminiOk = apiKey != null && !apiKey.isBlank();
+            String maskedKey = geminiOk ? (apiKey.length() > 8 ? apiKey.substring(0, 4) + "..." + apiKey.substring(apiKey.length() - 4) : "***") : "";
+
             Platform.runLater(() -> {
                 if (pgConnected) {
                     dbStatusBadge.setText("● PostgreSQL: Conectado");
@@ -669,6 +724,26 @@ public class MainController {
                     ffmpegStatusBadge.setText("● FFmpeg: Não encontrado");
                     ffmpegStatusBadge.setStyle("-fx-text-fill: -color-danger-fg;");
                     diagFfmpegLabel.setText("Não encontrado no PATH");
+                }
+
+                if (geminiStatusBadge != null) {
+                    if (geminiOk) {
+                        geminiStatusBadge.setText("● Gemini: OK");
+                        geminiStatusBadge.setStyle("-fx-text-fill: -color-success-fg;");
+                    } else {
+                        geminiStatusBadge.setText("● Gemini: Não configurado");
+                        geminiStatusBadge.setStyle("-fx-text-fill: -color-warning-fg;");
+                    }
+                }
+
+                if (diagGeminiLabel != null) {
+                    if (geminiOk) {
+                        diagGeminiLabel.setText("Configurada (" + maskedKey + ")");
+                        diagGeminiLabel.setStyle("-fx-text-fill: -color-success-fg;");
+                    } else {
+                        diagGeminiLabel.setText("Não configurada");
+                        diagGeminiLabel.setStyle("-fx-text-fill: -color-danger-fg;");
+                    }
                 }
 
                 diagYtDlpLabel.setText(ytdlpOk ? ytdlpPath.toString() : "Não disponível");
@@ -800,7 +875,55 @@ public class MainController {
             db.saveSettings(updated);
             Platform.runLater(() -> {
                 logMessage("Chave do Gemini salva com sucesso.", false);
+                if (geminiApiKeyStatusLabel != null) {
+                    if (key != null && !key.isBlank()) {
+                        geminiApiKeyStatusLabel.setText("Chave salva e configurada com sucesso.");
+                        geminiApiKeyStatusLabel.setStyle("-fx-text-fill: -color-success-fg; -fx-font-size: 11px;");
+                    } else {
+                        geminiApiKeyStatusLabel.setText("Nenhuma chave salva. Configure manualmente ou busque no ambiente.");
+                        geminiApiKeyStatusLabel.setStyle("-fx-text-fill: -color-fg-muted; -fx-font-size: 11px;");
+                    }
+                }
+                checkEnvironmentDiagnostics();
                 showAlert("Configuração Salva", "Chave de API do Gemini salva com sucesso.");
+            });
+        });
+    }
+
+    @FXML
+    private void onDetectApiKey() {
+        Thread.ofVirtual().start(() -> {
+            GeminiApiKeyResolver.ResolutionResult result = GeminiApiKeyResolver.resolveWithDetails();
+            Platform.runLater(() -> {
+                if (result.isFound()) {
+                    geminiApiKeyField.setText(result.key());
+                    AppSettings current = buildCurrentSettings();
+                    AppSettings updated = new AppSettings(
+                            current.outputDirectory(),
+                            current.minViralityScore(),
+                            current.autoProcessAboveThreshold(),
+                            current.defaultOrientation(),
+                            current.autoVerticalMaxDurationSeconds(),
+                            current.burnSubtitles(),
+                            current.cpuThreads(),
+                            result.key(),
+                            current.geminiModel()
+                    );
+                    Thread.ofVirtual().start(() -> db.saveSettings(updated));
+                    if (geminiApiKeyStatusLabel != null) {
+                        geminiApiKeyStatusLabel.setText("Chave detectada automaticamente de: " + result.source());
+                        geminiApiKeyStatusLabel.setStyle("-fx-text-fill: -color-success-fg; -fx-font-size: 11px;");
+                    }
+                    logMessage("Chave GEMINI_API_KEY detectada em [" + result.source() + "] e salva com sucesso.", false);
+                    showAlert("Chave Detectada", "Chave GEMINI_API_KEY encontrada com sucesso em:\n" + result.source() + "\n\nA chave foi aplicada e salva nas configurações do programa.");
+                } else {
+                    if (geminiApiKeyStatusLabel != null) {
+                        geminiApiKeyStatusLabel.setText("Nenhuma chave GEMINI_API_KEY encontrada no ambiente nem em arquivos (.zshrc, .bashrc, .env).");
+                        geminiApiKeyStatusLabel.setStyle("-fx-text-fill: -color-danger-fg; -fx-font-size: 11px;");
+                    }
+                    showAlert("Chave Não Encontrada", "Não foi possível encontrar a variável GEMINI_API_KEY nas variáveis de ambiente nem nos arquivos de configuração (~/.zshrc, ~/.bashrc, .env).");
+                }
+                checkEnvironmentDiagnostics();
             });
         });
     }

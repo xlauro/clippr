@@ -271,7 +271,26 @@ public class DatabaseManager {
         try {
             SettingsEntity entity = em.find(SettingsEntity.class, 1L);
             if (entity != null) {
-                return entity.toDomain();
+                AppSettings domain = entity.toDomain();
+                if (domain.geminiApiKey() == null || domain.geminiApiKey().isBlank()) {
+                    String resolvedKey = com.laurosantos.clippr.ai.GeminiApiKeyResolver.resolveApiKey();
+                    if (!resolvedKey.isBlank()) {
+                        AppSettings updated = new AppSettings(
+                                domain.outputDirectory(),
+                                domain.minViralityScore(),
+                                domain.autoProcessAboveThreshold(),
+                                domain.defaultOrientation(),
+                                domain.autoVerticalMaxDurationSeconds(),
+                                domain.burnSubtitles(),
+                                domain.cpuThreads(),
+                                resolvedKey,
+                                domain.geminiModel()
+                        );
+                        saveSettings(updated);
+                        return updated;
+                    }
+                }
+                return domain;
             }
             AppSettings defaults = AppSettings.defaultSettings();
             saveSettings(defaults);

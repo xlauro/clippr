@@ -157,4 +157,28 @@ class PostgresTestcontainersIntegrationTest {
         assertEquals(8, loaded.cpuThreads());
         assertEquals("custom-testcontainers-api-key", loaded.geminiApiKey());
     }
+
+    @Test
+    @DisplayName("Deve auto-preencher geminiApiKey a partir do resolver se salvo com chave vazia")
+    void shouldAutoResolveGeminiApiKeyWhenEmptyInDatabase() {
+        AppSettings emptyKeySettings = new AppSettings(
+                "/test/export",
+                85,
+                false,
+                OrientationMode.AUTO,
+                60.0,
+                true,
+                4,
+                "", // Chave vazia no banco
+                "gemini-2.5-flash"
+        );
+
+        db.saveSettings(emptyKeySettings);
+        AppSettings loaded = db.getSettings();
+
+        assertNotNull(loaded);
+        // O resolver deve ter detectado a chave real do ambiente (.zshrc) e atualizado
+        assertFalse(loaded.geminiApiKey().isBlank(), "A chave deve ser resolvida automaticamente quando vazia");
+        assertTrue(loaded.geminiApiKey().startsWith("AQ."), "A chave resolvida deve corresponder à chave do ambiente");
+    }
 }

@@ -33,6 +33,7 @@ public class YtDlpManager {
 
     public record VideoMetadata(String id, String title, String author, double durationSeconds) {}
     public record TranscriptResult(VideoMetadata metadata, List<TranscriptSegment> segments, String formattedTranscript, Path vttFile) {}
+    public record SubtitleTrack(String language, String url, String format) {}
 
     public YtDlpManager() {
         this.binaryPath = resolveOrDownloadBinary();
@@ -124,12 +125,7 @@ public class YtDlpManager {
         ProcessBuilder pb = new ProcessBuilder(
                 binaryPath.toString(),
                 "--dump-single-json",
-                "--skip-download",
-                "--write-auto-sub",
-                "--write-sub",
-                "--sub-lang", "pt.*,en.*,pt,en",
-                "--sub-format", "vtt",
-                "--output", outputTemplate,
+                "--no-playlist",
                 url
         );
 
@@ -137,7 +133,7 @@ public class YtDlpManager {
         Process process = pb.start();
 
         StringBuilder jsonOutput = new StringBuilder();
-        Thread.ofVirtual().start(() -> {
+        Thread outThread = Thread.ofVirtual().start(() -> {
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
@@ -147,7 +143,7 @@ public class YtDlpManager {
         });
 
         StringBuilder stderrOutput = new StringBuilder();
-        Thread.ofVirtual().start(() -> {
+        Thread errThread = Thread.ofVirtual().start(() -> {
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
@@ -158,6 +154,9 @@ public class YtDlpManager {
         });
 
         int exitCode = process.waitFor();
+        outThread.join();
+        errThread.join();
+
         if (exitCode != 0) {
             String err = stderrOutput.toString();
             logger.error("Falha ao extrair dados do YouTube (exitCode={}): {}", exitCode, err);
@@ -172,15 +171,82 @@ public class YtDlpManager {
 
         VideoMetadata metadata = new VideoMetadata(id, title, uploader, duration);
 
-        // Localiza o arquivo .vtt gerado na pasta tempDir
         Path foundVtt = null;
-        try (var stream = Files.list(tempDir)) {
-            for (Path path : stream.toList()) {
-                String filename = path.getFileName().toString();
-                if (filename.startsWith(id) && filename.endsWith(".vtt")) {
-                    foundVtt = path;
-                    break;
+        SubtitleTrack bestTrack = findBestSubtitleTrack(root);
+
+        // 1. Download direto da legenda via HTTP (rápido, não dispara 429 no YouTube)
+        if (bestTrack != null && bestTrack.url() != null && !bestTrack.url().isBlank()) {
+            try {
+                logger.info("Baixando legenda '{}' (formato {}) de {}", bestTrack.language(), bestTrack.format(), bestTrack.url());
+                EventBus.getInstance().publish(new ClipprEvent.LogMessage("Baixando legenda [%s] diretamente...".formatted(bestTrack.language()), false));
+
+                HttpClient client = HttpClient.newBuilder()
+                        .followRedirects(HttpClient.Redirect.ALWAYS)
+                        .connectTimeout(Duration.ofSeconds(15))
+                        .build();
+
+                HttpRequest request = HttpRequest.newBuilder()
+                        .uri(URI.create(bestTrack.url()))
+                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+                        .GET()
+                        .build();
+
+                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+                if (response.statusCode() >= 200 && response.statusCode() < 300 && !response.body().isBlank()) {
+                    Path destVtt = tempDir.resolve(id + "." + bestTrack.language() + ".vtt");
+                    Files.writeString(destVtt, response.body());
+                    foundVtt = destVtt;
+                } else {
+                    logger.warn("Resposta inesperada ao baixar legenda diretamente (HTTP {}): {}", response.statusCode(), response.body());
                 }
+            } catch (Exception e) {
+                logger.warn("Falha ao baixar legenda diretamente via HTTP: {}", e.getMessage());
+            }
+        }
+
+        // 2. Fallback: verifica se algum arquivo .vtt já existe no diretório temporário
+        if (foundVtt == null) {
+            try (var stream = Files.list(tempDir)) {
+                for (Path path : stream.toList()) {
+                    String filename = path.getFileName().toString();
+                    if (filename.startsWith(id) && filename.endsWith(".vtt")) {
+                        foundVtt = path;
+                        break;
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+
+        // 3. Fallback: se o download direto falhar, tenta yt-dlp com seleção restrita de idiomas
+        if (foundVtt == null) {
+            logger.info("Tentando baixar legenda via yt-dlp fallback...");
+            try {
+                ProcessBuilder subPb = new ProcessBuilder(
+                        binaryPath.toString(),
+                        "--no-playlist",
+                        "--skip-download",
+                        "--write-auto-sub",
+                        "--write-sub",
+                        "--sub-lang", "pt-orig,pt,en",
+                        "--sub-format", "vtt",
+                        "--output", outputTemplate,
+                        url
+                );
+                subPb.redirectErrorStream(true);
+                Process subProc = subPb.start();
+                subProc.waitFor();
+
+                try (var stream = Files.list(tempDir)) {
+                    for (Path path : stream.toList()) {
+                        String filename = path.getFileName().toString();
+                        if (filename.startsWith(id) && filename.endsWith(".vtt")) {
+                            foundVtt = path;
+                            break;
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                logger.warn("Fallback yt-dlp para legendas também falhou: {}", e.getMessage());
             }
         }
 
@@ -191,8 +257,13 @@ public class YtDlpManager {
             String vttContent = Files.readString(foundVtt);
             segments = TranscriptParser.parseVtt(vttContent);
             formattedTranscript = TranscriptParser.formatForAi(segments);
-            logger.info("Transcrição extraída com sucesso: {} segmentos encontrados.", segments.size());
-            EventBus.getInstance().publish(new ClipprEvent.LogMessage("Transcrição obtida com sucesso: %d trechos identificados.".formatted(segments.size()), false));
+            if (!segments.isEmpty()) {
+                logger.info("Transcrição extraída com sucesso: {} segmentos encontrados.", segments.size());
+                EventBus.getInstance().publish(new ClipprEvent.LogMessage("Transcrição obtida com sucesso: %d trechos identificados.".formatted(segments.size()), false));
+            } else {
+                logger.warn("Arquivo de legenda {} foi encontrado, mas nenhum segmento válido foi extraído.", foundVtt);
+                EventBus.getInstance().publish(new ClipprEvent.LogMessage("Aviso: O arquivo de legendas não continha texto reconhecível.", false));
+            }
         } else {
             logger.warn("Nenhuma legenda encontrada para o vídeo {}.", id);
             segments = List.of();
@@ -202,6 +273,75 @@ public class YtDlpManager {
 
         return new TranscriptResult(metadata, segments, formattedTranscript, foundVtt);
     }
+
+    static SubtitleTrack findBestSubtitleTrack(JsonNode root) {
+        if (root == null) {
+            return null;
+        }
+
+        String[] preferredLangs = {
+                "pt-orig", "pt-BR", "pt", "pt-PT",
+                "en-orig", "en", "en-US", "en-GB"
+        };
+
+        JsonNode manualSubs = root.path("subtitles");
+        JsonNode autoSubs = root.path("automatic_captions");
+
+        // 1. Legendas manuais com idiomas preferenciais
+        for (String lang : preferredLangs) {
+            SubtitleTrack track = extractTrack(manualSubs, lang);
+            if (track != null) return track;
+        }
+
+        // 2. Legendas automáticas com idiomas preferenciais
+        for (String lang : preferredLangs) {
+            SubtitleTrack track = extractTrack(autoSubs, lang);
+            if (track != null) return track;
+        }
+
+        // 3. Qualquer legenda manual disponível
+        SubtitleTrack anyManual = extractAnyTrack(manualSubs);
+        if (anyManual != null) return anyManual;
+
+        // 4. Qualquer legenda automática disponível
+        return extractAnyTrack(autoSubs);
+    }
+
+    private static SubtitleTrack extractTrack(JsonNode subsNode, String lang) {
+        if (subsNode == null || !subsNode.has(lang)) {
+            return null;
+        }
+        JsonNode formats = subsNode.get(lang);
+        if (formats != null && formats.isArray()) {
+            for (JsonNode fmt : formats) {
+                String ext = fmt.path("ext").asText();
+                String url = fmt.path("url").asText();
+                if ("vtt".equalsIgnoreCase(ext) && !url.isBlank()) {
+                    return new SubtitleTrack(lang, url, "vtt");
+                }
+            }
+            for (JsonNode fmt : formats) {
+                String ext = fmt.path("ext").asText();
+                String url = fmt.path("url").asText();
+                if ("srt".equalsIgnoreCase(ext) && !url.isBlank()) {
+                    return new SubtitleTrack(lang, url, "srt");
+                }
+            }
+        }
+        return null;
+    }
+
+    private static SubtitleTrack extractAnyTrack(JsonNode subsNode) {
+        if (subsNode == null || !subsNode.isObject()) {
+            return null;
+        }
+        for (var entry : subsNode.properties()) {
+            SubtitleTrack track = extractTrack(subsNode, entry.getKey());
+            if (track != null) return track;
+        }
+        return null;
+    }
+
 
     public Path downloadFullVideo(String url, Path destinationFile, java.util.function.Consumer<Double> progressConsumer) throws Exception {
         logger.info("Iniciando download do vídeo de alta qualidade: {} -> {}", url, destinationFile);

@@ -1,5 +1,7 @@
 package com.laurosantos.clippr.domain;
 
+import com.laurosantos.clippr.ai.GeminiApiKeyResolver;
+
 import java.nio.file.Path;
 
 public record AppSettings(
@@ -16,7 +18,7 @@ public record AppSettings(
     public static AppSettings defaultSettings() {
         String homeDir = System.getProperty("user.home", ".");
         String defaultOutput = Path.of(homeDir, "ClipprExports").toString();
-        String apiKey = System.getenv().getOrDefault("GEMINI_API_KEY", "");
+        String apiKey = GeminiApiKeyResolver.resolveApiKey();
         return new AppSettings(
                 defaultOutput,
                 90,

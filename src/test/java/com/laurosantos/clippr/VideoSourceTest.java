@@ -41,4 +41,27 @@ class VideoSourceTest {
         assertNotNull(source.createdAt());
         assertEquals(0.0, source.durationSeconds());
     }
+
+    @ParameterizedTest
+    @DisplayName("isValidYouTubeUrl deve validar links do YouTube corretamente")
+    @CsvSource({
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ, true",
+            "https://youtu.be/dQw4w9WgXcQ, true",
+            "https://youtube.com/shorts/123, true",
+            "https://vimeo.com/123456, false",
+            "not-a-url, false",
+            "'', false"
+    })
+    void shouldValidateYouTubeUrls(String url, boolean expected) {
+        assertEquals(expected, VideoSource.isValidYouTubeUrl(url));
+    }
+
+    @Test
+    @DisplayName("withStatus deve atualizar status de forma imutável")
+    void shouldUpdateStatusImmutably() {
+        VideoSource source = VideoSource.fromUrl("https://www.youtube.com/watch?v=teste123");
+        VideoSource updated = source.withStatus(com.laurosantos.clippr.domain.ProcessingStatus.COMPLETED, null);
+        assertEquals(com.laurosantos.clippr.domain.ProcessingStatus.COMPLETED, updated.status());
+        assertEquals(com.laurosantos.clippr.domain.ProcessingStatus.PENDING, source.status());
+    }
 }

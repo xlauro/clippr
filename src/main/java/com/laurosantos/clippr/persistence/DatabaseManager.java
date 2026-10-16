@@ -88,7 +88,17 @@ public class DatabaseManager {
     }
 
     public VideoSource saveVideo(VideoSource source) {
-        if (!init()) return source;
+        if (!init()) {
+            if (source.id() == null) {
+                return new VideoSource(
+                        -Math.abs(System.nanoTime()),
+                        source.url(), source.videoId(), source.title(), source.author(),
+                        source.durationSeconds(), source.transcriptPath(), source.localVideoPath(),
+                        source.status(), source.errorMessage(), source.createdAt()
+                );
+            }
+            return source;
+        }
         EntityManager em = entityManagerFactory.createEntityManager();
         try {
             em.getTransaction().begin();
@@ -103,6 +113,14 @@ public class DatabaseManager {
         } catch (Exception e) {
             if (em.getTransaction().isActive()) em.getTransaction().rollback();
             logger.error("Erro ao salvar vídeo no banco: {}", e.getMessage(), e);
+            if (source.id() == null) {
+                return new VideoSource(
+                        -Math.abs(System.nanoTime()),
+                        source.url(), source.videoId(), source.title(), source.author(),
+                        source.durationSeconds(), source.transcriptPath(), source.localVideoPath(),
+                        source.status(), source.errorMessage(), source.createdAt()
+                );
+            }
             return source;
         } finally {
             em.close();
@@ -130,7 +148,19 @@ public class DatabaseManager {
     }
 
     public List<ClipCandidate> saveClips(Long videoSourceId, List<ClipCandidate> candidates) {
-        if (!init() || videoSourceId == null || candidates.isEmpty()) return candidates;
+        if (!init() || videoSourceId == null || candidates.isEmpty()) {
+            List<ClipCandidate> fallback = new ArrayList<>();
+            for (ClipCandidate c : candidates) {
+                fallback.add(c.id() != null ? c : new ClipCandidate(
+                        -Math.abs(System.nanoTime()),
+                        videoSourceId, c.title(), c.hook(), c.startSeconds(), c.endSeconds(),
+                        c.viralityScore(), c.reasoning(), c.suggestedCaption(), c.hashtags(),
+                        c.orientation(), c.hasSubtitles(), c.outputFilePath(), c.metadataJsonPath(),
+                        c.status()
+                ));
+            }
+            return fallback;
+        }
         EntityManager em = entityManagerFactory.createEntityManager();
         List<ClipCandidate> savedList = new ArrayList<>();
         try {
@@ -173,6 +203,63 @@ public class DatabaseManager {
         } catch (Exception e) {
             if (em.getTransaction().isActive()) em.getTransaction().rollback();
             logger.error("Erro ao atualizar timestamps do clipe {}: {}", clipId, e.getMessage(), e);
+        } finally {
+            em.close();
+        }
+    }
+
+    public void updateClipOutput(Long clipId, String outputPath, String metadataPath, ProcessingStatus status) {
+        if (!init() || clipId == null) return;
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            em.getTransaction().begin();
+            ClipEntity entity = em.find(ClipEntity.class, clipId);
+            if (entity != null) {
+                entity.setOutputFilePath(outputPath);
+                entity.setMetadataJsonPath(metadataPath);
+                entity.setStatus(status != null ? status : ProcessingStatus.COMPLETED);
+                em.merge(entity);
+            }
+            em.getTransaction().commit();
+        } catch (Exception e) {
+            if (em.getTransaction().isActive()) em.getTransaction().rollback();
+            logger.error("Erro ao atualizar saída do clipe {}: {}", clipId, e.getMessage(), e);
+        } finally {
+            em.close();
+        }
+    }
+
+    public void deleteVideo(Long videoId) {
+        if (!init() || videoId == null) return;
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            em.getTransaction().begin();
+            VideoEntity entity = em.find(VideoEntity.class, videoId);
+            if (entity != null) {
+                em.remove(entity);
+            }
+            em.getTransaction().commit();
+        } catch (Exception e) {
+            if (em.getTransaction().isActive()) em.getTransaction().rollback();
+            logger.error("Erro ao remover vídeo {}: {}", videoId, e.getMessage(), e);
+        } finally {
+            em.close();
+        }
+    }
+
+    public void deleteClip(Long clipId) {
+        if (!init() || clipId == null) return;
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            em.getTransaction().begin();
+            ClipEntity entity = em.find(ClipEntity.class, clipId);
+            if (entity != null) {
+                em.remove(entity);
+            }
+            em.getTransaction().commit();
+        } catch (Exception e) {
+            if (em.getTransaction().isActive()) em.getTransaction().rollback();
+            logger.error("Erro ao remover clipe {}: {}", clipId, e.getMessage(), e);
         } finally {
             em.close();
         }

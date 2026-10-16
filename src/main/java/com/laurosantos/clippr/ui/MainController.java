@@ -3,6 +3,7 @@ package com.laurosantos.clippr.ui;
 import com.laurosantos.clippr.domain.AppSettings;
 import com.laurosantos.clippr.domain.ClipCandidate;
 import com.laurosantos.clippr.domain.OrientationMode;
+import com.laurosantos.clippr.domain.ProcessingStatus;
 import com.laurosantos.clippr.domain.VideoSource;
 import com.laurosantos.clippr.downloader.YtDlpManager;
 import com.laurosantos.clippr.events.ClipprEvent;
@@ -16,6 +17,9 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.fxml.FXML;
 import javafx.scene.control.*;
+import javafx.scene.input.Clipboard;
+import javafx.scene.input.ClipboardContent;
+import javafx.scene.layout.StackPane;
 import javafx.scene.media.Media;
 import javafx.scene.media.MediaPlayer;
 import javafx.scene.media.MediaView;
@@ -24,7 +28,11 @@ import javafx.util.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.awt.Desktop;
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.InputStreamReader;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -63,6 +71,7 @@ public class MainController {
     @FXML private TableColumn<ClipCandidate, String> colClipStatus;
 
     // Player de Vídeo e Ajuste Fino
+    @FXML private StackPane playerContainer;
     @FXML private MediaView mediaView;
     @FXML private Label playerPlaceholderLabel;
     @FXML private Slider timeSlider;
@@ -88,11 +97,15 @@ public class MainController {
 
     private MediaPlayer mediaPlayer;
     private ClipCandidate currentPreviewClip;
+    private double activeStartSeconds = 0.0;
+    private double activeEndSeconds = 0.0;
+    private boolean isPlayingRenderedFile = false;
     private boolean isSeeking = false;
 
     @FXML
     private void initialize() {
         setupTableColumns();
+        setupTableContextMenu();
         setupOrientationComboBox();
         setupPlayerSelectionListener();
         loadSettings();
@@ -127,12 +140,129 @@ public class MainController {
         colClipStatus.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().status().getDescription()));
     }
 
+    private void setupTableContextMenu() {
+        // Menu de Contexto para a Fila de Vídeos
+        ContextMenu videoMenu = new ContextMenu();
+        MenuItem itemStartThis = new MenuItem("▶ Iniciar Processamento Deste Vídeo");
+        itemStartThis.setOnAction(_ -> {
+            VideoSource sel = videoTableView.getSelectionModel().getSelectedItem();
+            if (sel != null) {
+                AppSettings settings = buildCurrentSettings();
+                logMessage("Iniciando vídeo selecionado: " + sel.url(), false);
+                pipelineService.processVideoSource(sel, settings);
+            }
+        });
+
+        MenuItem itemCopyUrl = new MenuItem("📋 Copiar Link");
+        itemCopyUrl.setOnAction(_ -> {
+            VideoSource sel = videoTableView.getSelectionModel().getSelectedItem();
+            if (sel != null) {
+                Clipboard clipboard = Clipboard.getSystemClipboard();
+                ClipboardContent content = new ClipboardContent();
+                content.putString(sel.url());
+                clipboard.setContent(content);
+                logMessage("Link copiado para a área de transferência: " + sel.url(), false);
+            }
+        });
+
+        MenuItem itemOpenBrowser = new MenuItem("🌐 Abrir no Navegador");
+        itemOpenBrowser.setOnAction(_ -> {
+            VideoSource sel = videoTableView.getSelectionModel().getSelectedItem();
+            if (sel != null && Desktop.isDesktopSupported()) {
+                try {
+                    Desktop.getDesktop().browse(new URI(sel.url()));
+                } catch (Exception ignored) {}
+            }
+        });
+
+        MenuItem itemRemoveVideo = new MenuItem("🗑 Remover da Fila");
+        itemRemoveVideo.setOnAction(_ -> {
+            VideoSource sel = videoTableView.getSelectionModel().getSelectedItem();
+            if (sel != null) {
+                videoList.remove(sel);
+                Thread.ofVirtual().start(() -> db.deleteVideo(sel.id()));
+                logMessage("Vídeo removido da fila: " + sel.url(), false);
+            }
+        });
+
+        videoMenu.getItems().addAll(itemStartThis, itemCopyUrl, itemOpenBrowser, new SeparatorMenuItem(), itemRemoveVideo);
+        videoTableView.setContextMenu(videoMenu);
+
+        // Menu de Contexto para a Tabela de Cortes
+        ContextMenu clipMenu = new ContextMenu();
+        MenuItem itemRenderThis = new MenuItem("▶ Renderizar Este Corte");
+        itemRenderThis.setOnAction(_ -> onRenderSelectedClip());
+
+        MenuItem itemOpenFolder = new MenuItem("📂 Abrir Pasta de Exportação");
+        itemOpenFolder.setOnAction(_ -> {
+            ClipCandidate sel = clipTableView.getSelectionModel().getSelectedItem();
+            if (sel != null && sel.outputFilePath() != null) {
+                File f = new File(sel.outputFilePath());
+                if (f.exists() && Desktop.isDesktopSupported()) {
+                    try {
+                        Desktop.getDesktop().open(f.getParentFile());
+                    } catch (Exception ex) {
+                        logMessage("Não foi possível abrir pasta: " + ex.getMessage(), false);
+                    }
+                }
+            } else {
+                showAlert("Não Renderizado", "Este corte ainda não foi renderizado em disco.");
+            }
+        });
+
+        MenuItem itemCopyCaption = new MenuItem("📋 Copiar Legenda Sugerida");
+        itemCopyCaption.setOnAction(_ -> {
+            ClipCandidate sel = clipTableView.getSelectionModel().getSelectedItem();
+            if (sel != null && sel.suggestedCaption() != null) {
+                Clipboard clipboard = Clipboard.getSystemClipboard();
+                ClipboardContent content = new ClipboardContent();
+                content.putString(sel.suggestedCaption());
+                clipboard.setContent(content);
+                logMessage("Legenda copiada para a área de transferência.", false);
+            }
+        });
+
+        MenuItem itemCopyHashtags = new MenuItem("🏷 Copiar Hashtags");
+        itemCopyHashtags.setOnAction(_ -> {
+            ClipCandidate sel = clipTableView.getSelectionModel().getSelectedItem();
+            if (sel != null && sel.hashtags() != null) {
+                Clipboard clipboard = Clipboard.getSystemClipboard();
+                ClipboardContent content = new ClipboardContent();
+                content.putString(String.join(" ", sel.hashtags()));
+                clipboard.setContent(content);
+                logMessage("Hashtags copiadas: " + String.join(" ", sel.hashtags()), false);
+            }
+        });
+
+        MenuItem itemDeleteClip = new MenuItem("🗑 Excluir Corte");
+        itemDeleteClip.setOnAction(_ -> {
+            ClipCandidate sel = clipTableView.getSelectionModel().getSelectedItem();
+            if (sel != null) {
+                clipList.remove(sel);
+                if (currentPreviewClip != null && currentPreviewClip.id() != null && currentPreviewClip.id().equals(sel.id())) {
+                    disposeMediaPlayer();
+                    playerPlaceholderLabel.setVisible(true);
+                }
+                Thread.ofVirtual().start(() -> db.deleteClip(sel.id()));
+                logMessage("Corte removido: " + sel.title(), false);
+            }
+        });
+
+        clipMenu.getItems().addAll(itemRenderThis, itemOpenFolder, new SeparatorMenuItem(), itemCopyCaption, itemCopyHashtags, new SeparatorMenuItem(), itemDeleteClip);
+        clipTableView.setContextMenu(clipMenu);
+    }
+
     private void setupOrientationComboBox() {
         comboOrientation.setItems(FXCollections.observableArrayList(OrientationMode.values()));
         comboOrientation.setValue(OrientationMode.AUTO);
     }
 
     private void setupPlayerSelectionListener() {
+        if (playerContainer != null) {
+            mediaView.fitWidthProperty().bind(playerContainer.widthProperty().subtract(16));
+            mediaView.fitHeightProperty().bind(playerContainer.heightProperty().subtract(16));
+        }
+
         clipTableView.getSelectionModel().selectedItemProperty().addListener((_, _, selected) -> {
             if (selected != null) {
                 loadClipInPlayer(selected);
@@ -155,6 +285,10 @@ public class MainController {
 
     private void loadClipInPlayer(ClipCandidate clip) {
         this.currentPreviewClip = clip;
+        this.activeStartSeconds = clip.startSeconds();
+        this.activeEndSeconds = clip.endSeconds();
+        this.isPlayingRenderedFile = false;
+
         lblStartSeconds.setText(String.format("%.1fs", clip.startSeconds()));
         lblEndSeconds.setText(String.format("%.1fs", clip.endSeconds()));
 
@@ -162,6 +296,7 @@ public class MainController {
 
         // 1. Tenta carregar o clipe já renderizado
         if (clip.outputFilePath() != null && Files.exists(Path.of(clip.outputFilePath()))) {
+            this.isPlayingRenderedFile = true;
             playMediaFile(new File(clip.outputFilePath()), 0.0, clip.durationSeconds());
             playerPlaceholderLabel.setVisible(false);
             return;
@@ -176,10 +311,32 @@ public class MainController {
                 playerPlaceholderLabel.setVisible(false);
                 return;
             }
+
+            // 3. Vídeo fonte ainda não baixado: baixa sob demanda em Virtual Thread com feedback visual
+            playerPlaceholderLabel.setText("⏳ Baixando vídeo original do YouTube para pré-visualização...");
+            playerPlaceholderLabel.setVisible(true);
+
+            Thread.ofVirtual().start(() -> {
+                try {
+                    Path downloaded = pipelineService.getOrCreateVideoFile(source);
+                    Platform.runLater(() -> {
+                        if (currentPreviewClip != null && currentPreviewClip.id() != null && currentPreviewClip.id().equals(clip.id())) {
+                            playerPlaceholderLabel.setVisible(false);
+                            playMediaFile(downloaded.toFile(), activeStartSeconds, activeEndSeconds);
+                        }
+                    });
+                } catch (Exception ex) {
+                    logger.error("Erro ao baixar vídeo para pré-visualização: {}", ex.getMessage());
+                    Platform.runLater(() -> {
+                        playerPlaceholderLabel.setText("Não foi possível carregar o vídeo: " + ex.getMessage());
+                        playerPlaceholderLabel.setVisible(true);
+                    });
+                }
+            });
+            return;
         }
 
-        // 3. Vídeo fonte ainda não baixado
-        playerPlaceholderLabel.setText("Vídeo original ainda não baixado.\nRenderize o corte para assistir.");
+        playerPlaceholderLabel.setText("Vídeo de origem não encontrado na fila.");
         playerPlaceholderLabel.setVisible(true);
     }
 
@@ -213,10 +370,10 @@ public class MainController {
                         updateTimeDisplay(currentSec, mediaPlayer.getTotalDuration().toSeconds());
                     }
 
-                    // Se for pré-visualização de trecho não cortado, para no final do corte
-                    if (endLimitSeconds > startOffsetSeconds && currentSec >= endLimitSeconds) {
+                    // Se for pré-visualização de trecho não cortado, respeita os limites dinâmicos
+                    if (!isPlayingRenderedFile && activeEndSeconds > activeStartSeconds && currentSec >= activeEndSeconds) {
                         mediaPlayer.pause();
-                        mediaPlayer.seek(Duration.seconds(startOffsetSeconds));
+                        mediaPlayer.seek(Duration.seconds(activeStartSeconds));
                         btnPlayPause.setText("▶ Play");
                     }
                 }
@@ -224,7 +381,7 @@ public class MainController {
 
             mediaPlayer.setOnEndOfMedia(() -> {
                 btnPlayPause.setText("▶ Play");
-                mediaPlayer.seek(Duration.seconds(startOffsetSeconds));
+                mediaPlayer.seek(Duration.seconds(isPlayingRenderedFile ? 0.0 : activeStartSeconds));
             });
 
             btnPlayPause.setText("▶ Play");
@@ -275,11 +432,19 @@ public class MainController {
 
     @FXML
     private void onSetStartCurrent() {
-        if (mediaPlayer != null && currentPreviewClip != null) {
-            double currentSec = mediaPlayer.getCurrentTime().toSeconds();
-            if (currentSec < currentPreviewClip.endSeconds()) {
-                setClipBounds(currentSec, currentPreviewClip.endSeconds());
-            }
+        if (mediaPlayer == null || currentPreviewClip == null) {
+            showAlert("Player Inativo", "Selecione e reproduza um corte para marcar a posição atual.");
+            return;
+        }
+        if (isPlayingRenderedFile) {
+            showAlert("Vídeo Já Renderizado", "Este corte já foi finalizado. O ajuste de marcadores aplica-se a vídeos antes da renderização.");
+            return;
+        }
+        double currentSec = mediaPlayer.getCurrentTime().toSeconds();
+        if (currentSec < activeEndSeconds) {
+            setClipBounds(currentSec, activeEndSeconds);
+        } else {
+            showAlert("Marcação Inválida", "O início do corte deve ser menor que o término atual (%.1fs).".formatted(activeEndSeconds));
         }
     }
 
@@ -295,16 +460,31 @@ public class MainController {
 
     @FXML
     private void onSetEndCurrent() {
-        if (mediaPlayer != null && currentPreviewClip != null) {
-            double currentSec = mediaPlayer.getCurrentTime().toSeconds();
-            if (currentSec > currentPreviewClip.startSeconds()) {
-                setClipBounds(currentPreviewClip.startSeconds(), currentSec);
-            }
+        if (mediaPlayer == null || currentPreviewClip == null) {
+            showAlert("Player Inativo", "Selecione e reproduza um corte para marcar a posição atual.");
+            return;
+        }
+        if (isPlayingRenderedFile) {
+            showAlert("Vídeo Já Renderizado", "Este corte já foi finalizado. O ajuste de marcadores aplica-se a vídeos antes da renderização.");
+            return;
+        }
+        double currentSec = mediaPlayer.getCurrentTime().toSeconds();
+        if (currentSec > activeStartSeconds) {
+            setClipBounds(activeStartSeconds, currentSec);
+        } else {
+            showAlert("Marcação Inválida", "O término do corte deve ser maior que o início atual (%.1fs).".formatted(activeStartSeconds));
         }
     }
 
     private void adjustClipBounds(double deltaStart, double deltaEnd) {
-        if (currentPreviewClip == null) return;
+        if (currentPreviewClip == null) {
+            showAlert("Nenhum Corte", "Selecione um corte na tabela antes de ajustar os marcadores.");
+            return;
+        }
+        if (isPlayingRenderedFile) {
+            showAlert("Vídeo Já Renderizado", "Este corte já foi finalizado. O ajuste de marcadores aplica-se a vídeos antes da renderização.");
+            return;
+        }
         double newStart = Math.max(0, currentPreviewClip.startSeconds() + deltaStart);
         double newEnd = Math.max(newStart + 1.0, currentPreviewClip.endSeconds() + deltaEnd);
         setClipBounds(newStart, newEnd);
@@ -312,6 +492,9 @@ public class MainController {
 
     private void setClipBounds(double start, double end) {
         if (currentPreviewClip == null) return;
+        this.activeStartSeconds = start;
+        this.activeEndSeconds = end;
+
         ClipCandidate updated = currentPreviewClip.withBounds(start, end);
         currentPreviewClip = updated;
 
@@ -326,12 +509,18 @@ public class MainController {
             }
         }
 
+        // Se o player estiver ativo e tocando o vídeo fonte, faz seek para o novo início para feedback visual imediato
+        if (mediaPlayer != null && !isPlayingRenderedFile) {
+            mediaPlayer.seek(Duration.seconds(start));
+            timeSlider.setValue(start);
+        }
+
         // Persiste no banco de dados
         Thread.ofVirtual().start(() -> {
             db.updateClipTimeBounds(updated.id(), start, end);
         });
 
-        logMessage("Marcadores de tempo atualizados: %.1fs -> %.1fs".formatted(start, end), false);
+        logMessage("Marcadores atualizados: %.1fs -> %.1fs (Duração: %.1fs)".formatted(start, end, end - start), false);
     }
 
     @FXML
@@ -349,17 +538,21 @@ public class MainController {
         }
 
         AppSettings settings = buildCurrentSettings();
-        logMessage("Renderizando corte selecionado: " + selected.title(), false);
+        logMessage("Iniciando renderização de: " + selected.title(), false);
         pipelineService.renderClipsForSource(source, List.of(selected), settings);
     }
 
     private VideoSource findSourceForClip(ClipCandidate clip) {
-        if (clip.videoSourceId() == null) return null;
+        if (clip.videoSourceId() == null) {
+            if (videoList.size() == 1) return videoList.getFirst();
+            return null;
+        }
         for (VideoSource vs : videoList) {
             if (clip.videoSourceId().equals(vs.id())) {
                 return vs;
             }
         }
+        if (videoList.size() == 1) return videoList.getFirst();
         return null;
     }
 
@@ -389,35 +582,61 @@ public class MainController {
         }));
 
         eventBus.subscribe(ClipprEvent.VideoSourceUpdated.class, event -> Platform.runLater(() -> {
+            boolean found = false;
             for (int i = 0; i < videoList.size(); i++) {
                 if (videoList.get(i).id() != null && videoList.get(i).id().equals(event.videoSource().id())) {
                     videoList.set(i, event.videoSource());
-                    return;
+                    found = true;
+                    break;
                 }
             }
+            if (!found) {
+                videoList.add(event.videoSource());
+            }
+            updatePipelineButtonsState();
         }));
 
         eventBus.subscribe(ClipprEvent.ClipsEvaluated.class, event -> Platform.runLater(() -> {
-            clipList.addAll(event.approvedClips());
+            for (ClipCandidate approved : event.approvedClips()) {
+                boolean exists = clipList.stream().anyMatch(c -> c.id() != null && c.id().equals(approved.id()));
+                if (!exists) {
+                    clipList.add(approved);
+                }
+            }
             if (!event.approvedClips().isEmpty()) {
                 tabPane.getSelectionModel().select(1); // Muda para a aba de cortes
             }
+            updatePipelineButtonsState();
         }));
 
         eventBus.subscribe(ClipprEvent.ClipRenderCompleted.class, event -> Platform.runLater(() -> {
             for (int i = 0; i < clipList.size(); i++) {
-                if (clipList.get(i).title().equals(event.clip().title())) {
+                if ((clipList.get(i).id() != null && clipList.get(i).id().equals(event.clip().id())) ||
+                    clipList.get(i).title().equals(event.clip().title())) {
                     clipList.set(i, event.clip());
                     break;
                 }
             }
             statusLabel.setText("Renderizado: " + event.clip().title());
+            updatePipelineButtonsState();
         }));
 
         eventBus.subscribe(ClipprEvent.PipelineError.class, event -> Platform.runLater(() -> {
             statusLabel.setText("Erro: " + event.errorMessage());
             logMessage("[ERRO " + event.stage() + "] " + event.errorMessage(), false);
+            updatePipelineButtonsState();
         }));
+    }
+
+    private void updatePipelineButtonsState() {
+        boolean hasActive = videoList.stream().anyMatch(v ->
+                v.status() == ProcessingStatus.FETCHING_TRANSCRIPT ||
+                v.status() == ProcessingStatus.ANALYZING_AI ||
+                v.status() == ProcessingStatus.DOWNLOADING_VIDEO ||
+                v.status() == ProcessingStatus.CUTTING_FFMPEG
+        );
+        btnStartPipeline.setDisable(hasActive);
+        btnStartPipeline.setText(hasActive ? "⏳ Processando Fila..." : "▶ Iniciar Processamento");
     }
 
     public void checkEnvironmentDiagnostics() {
@@ -463,17 +682,43 @@ public class MainController {
         if (url == null || url.isBlank()) return;
 
         url = url.trim();
-        VideoSource source = VideoSource.fromUrl(url);
-        VideoSource saved = db.saveVideo(source);
-        videoList.add(saved);
+
+        if (!VideoSource.isValidYouTubeUrl(url)) {
+            showAlert("Link Inválido", "O link fornecido não parece ser um link válido do YouTube.\n\nExemplos aceitos:\n- https://www.youtube.com/watch?v=...\n- https://youtu.be/...\n- https://www.youtube.com/shorts/...");
+            return;
+        }
+
+        final String finalUrl = url;
+        boolean alreadyInQueue = videoList.stream().anyMatch(v -> v.url().equalsIgnoreCase(finalUrl));
+        if (alreadyInQueue) {
+            showAlert("Link Duplicado", "Este vídeo já está presente na fila.");
+            return;
+        }
+
+        VideoSource source = VideoSource.fromUrl(finalUrl);
         linkInputField.clear();
-        logMessage("Link adicionado à fila: " + url, false);
+        logMessage("Adicionando à fila: " + finalUrl, false);
+
+        Thread.ofVirtual().start(() -> {
+            VideoSource saved = db.saveVideo(source);
+            Platform.runLater(() -> {
+                videoList.add(saved);
+                statusLabel.setText("Vídeo adicionado: " + saved.videoId());
+            });
+        });
     }
 
     @FXML
     private void onClearQueue() {
         videoList.clear();
-        logMessage("Fila de vídeos limpa.", false);
+        clipList.clear();
+        disposeMediaPlayer();
+        playerPlaceholderLabel.setText("Selecione um corte na tabela para assistir");
+        playerPlaceholderLabel.setVisible(true);
+        progressBar.setProgress(0.0);
+        statusLabel.setText("Fila limpa. Adicione novos vídeos.");
+        logMessage("Fila de vídeos e lista de cortes limpas.", false);
+        updatePipelineButtonsState();
     }
 
     @FXML
@@ -483,11 +728,25 @@ public class MainController {
             return;
         }
 
-        AppSettings currentSettings = buildCurrentSettings();
-        db.saveSettings(currentSettings);
+        List<VideoSource> pendingVideos = videoList.stream()
+                .filter(v -> v.status() == ProcessingStatus.PENDING || v.status() == ProcessingStatus.FAILED)
+                .toList();
 
-        logMessage("Iniciando processamento em lote da fila de vídeos...", false);
-        for (VideoSource source : videoList) {
+        if (pendingVideos.isEmpty()) {
+            showAlert("Tudo Pronto", "Todos os vídeos da fila já foram processados.");
+            return;
+        }
+
+        btnStartPipeline.setDisable(true);
+        btnStartPipeline.setText("⏳ Processando Fila...");
+
+        AppSettings currentSettings = buildCurrentSettings();
+        Thread.ofVirtual().start(() -> {
+            db.saveSettings(currentSettings);
+        });
+
+        logMessage("Iniciando processamento de " + pendingVideos.size() + " vídeo(s)...", false);
+        for (VideoSource source : pendingVideos) {
             pipelineService.processVideoSource(source, currentSettings);
         }
     }
@@ -499,11 +758,20 @@ public class MainController {
             return;
         }
 
+        List<ClipCandidate> toRender = clipList.stream()
+                .filter(c -> c.status() != ProcessingStatus.COMPLETED)
+                .toList();
+
+        if (toRender.isEmpty()) {
+            showAlert("Todos Renderizados", "Todos os cortes desta lista já foram renderizados com sucesso.");
+            return;
+        }
+
         AppSettings settings = buildCurrentSettings();
-        logMessage("Iniciando renderização de todos os cortes aprovados...", false);
+        logMessage("Iniciando renderização de " + toRender.size() + " corte(s) aprovado(s)...", false);
 
         for (VideoSource source : videoList) {
-            List<ClipCandidate> clipsForSource = clipList.stream()
+            List<ClipCandidate> clipsForSource = toRender.stream()
                     .filter(c -> c.videoSourceId() != null && c.videoSourceId().equals(source.id()))
                     .toList();
 
@@ -516,20 +784,25 @@ public class MainController {
     @FXML
     private void onSaveApiKey() {
         String key = geminiApiKeyField.getText();
+        AppSettings current = buildCurrentSettings();
         AppSettings updated = new AppSettings(
-                outputDirField.getText(),
-                90,
-                chkAutoProcess.isSelected(),
-                comboOrientation.getValue(),
-                60.0,
-                chkSubtitles.isSelected(),
-                0,
-                key,
-                "gemini-2.5-flash"
+                current.outputDirectory(),
+                current.minViralityScore(),
+                current.autoProcessAboveThreshold(),
+                current.defaultOrientation(),
+                current.autoVerticalMaxDurationSeconds(),
+                current.burnSubtitles(),
+                current.cpuThreads(),
+                key != null ? key.trim() : "",
+                current.geminiModel()
         );
-        db.saveSettings(updated);
-        logMessage("Chave do Gemini salva com sucesso.", false);
-        showAlert("Configuração Salva", "Chave de API do Gemini atualizada com sucesso.");
+        Thread.ofVirtual().start(() -> {
+            db.saveSettings(updated);
+            Platform.runLater(() -> {
+                logMessage("Chave do Gemini salva com sucesso.", false);
+                showAlert("Configuração Salva", "Chave de API do Gemini salva com sucesso.");
+            });
+        });
     }
 
     @FXML
@@ -540,7 +813,9 @@ public class MainController {
         if (dir != null) {
             outputDirField.setText(dir.getAbsolutePath());
             AppSettings updated = buildCurrentSettings();
-            db.saveSettings(updated);
+            Thread.ofVirtual().start(() -> {
+                db.saveSettings(updated);
+            });
             logMessage("Pasta de destino alterada para: " + dir.getAbsolutePath(), false);
         }
     }
@@ -549,13 +824,36 @@ public class MainController {
     private void onStartDockerCompose() {
         Thread.ofVirtual().start(() -> {
             try {
+                Platform.runLater(() -> {
+                    diagPostgresLabel.setText("Subindo container...");
+                });
                 logMessage("Executando 'docker compose up -d'...", false);
-                Process p = new ProcessBuilder("docker", "compose", "up", "-d").start();
+                Process p = new ProcessBuilder("docker", "compose", "up", "-d")
+                        .redirectErrorStream(true)
+                        .start();
+
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        logMessage("[Docker] " + line, false);
+                    }
+                }
                 int exit = p.waitFor();
                 if (exit == 0) {
-                    logMessage("Docker Compose iniciado com sucesso.", false);
-                    Thread.sleep(1500);
-                    db.init();
+                    logMessage("Docker Compose executado. Aguardando conexão com PostgreSQL...", false);
+                    boolean ready = false;
+                    for (int i = 0; i < 10; i++) {
+                        Thread.sleep(1000);
+                        if (db.init() && db.isConnected()) {
+                            ready = true;
+                            break;
+                        }
+                    }
+                    if (ready) {
+                        logMessage("PostgreSQL pronto e conectado com sucesso!", false);
+                    } else {
+                        logMessage("PostgreSQL ainda inicializando. Verifique em instantes.", false);
+                    }
                     checkEnvironmentDiagnostics();
                 } else {
                     logMessage("Falha ao subir Docker Compose (exit code " + exit + ")", false);

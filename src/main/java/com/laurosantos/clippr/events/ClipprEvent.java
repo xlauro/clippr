@@ -18,6 +18,10 @@ public sealed interface ClipprEvent {
         public ProgressUpdated(String stage, double progress, String details) {
             this(Instant.now(), stage, progress, details);
         }
+
+        public ProgressUpdated(double progress, String details) {
+            this(Instant.now(), "PIPELINE", progress, details);
+        }
     }
 
     record VideoSourceUpdated(Instant timestamp, VideoSource videoSource) implements ClipprEvent {

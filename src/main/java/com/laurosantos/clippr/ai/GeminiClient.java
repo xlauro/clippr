@@ -122,8 +122,6 @@ public class GeminiClient {
                 false
         ));
 
-        EventBus.getInstance().publish(new ClipprEvent.ClipsEvaluated(videoSourceId, approved, discarded.size()));
-
         return new AnalysisResult(approved, discarded);
     }
 

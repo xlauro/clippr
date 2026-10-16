@@ -32,6 +32,19 @@ public record VideoSource(
         );
     }
 
+    public VideoSource withStatus(ProcessingStatus newStatus, String newError) {
+        return new VideoSource(
+                id, url, videoId, title, author, durationSeconds, transcriptPath, localVideoPath,
+                newStatus, newError, createdAt
+        );
+    }
+
+    public static boolean isValidYouTubeUrl(String url) {
+        if (url == null || url.isBlank()) return false;
+        String trimmed = url.trim().toLowerCase();
+        return trimmed.contains("youtube.com") || trimmed.contains("youtu.be");
+    }
+
     public static String extractVideoId(String url) {
         if (url == null || url.isBlank()) return "";
         if (url.contains("v=")) {
@@ -46,7 +59,12 @@ public record VideoSource(
             String sub = url.substring(url.indexOf("shorts/") + 7);
             int qm = sub.indexOf('?');
             return qm != -1 ? sub.substring(0, qm) : sub;
+        } else if (url.contains("live/")) {
+            String sub = url.substring(url.indexOf("live/") + 5);
+            int qm = sub.indexOf('?');
+            return qm != -1 ? sub.substring(0, qm) : sub;
         }
-        return url.trim();
+        // Fallback: sanitiza caracteres inválidos para sistema de arquivos
+        return url.trim().replaceAll("[^a-zA-Z0-9_-]", "_");
     }
 }

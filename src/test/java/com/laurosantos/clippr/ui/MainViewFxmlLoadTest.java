@@ -29,19 +29,34 @@ class MainViewFxmlLoadTest {
     @Test
     @DisplayName("Garante que o arquivo main-view.fxml carrega com sucesso e sem exceções de tipo ou binding")
     void testMainViewFxmlLoadsSuccessfully() throws ExecutionException, InterruptedException, TimeoutException {
-        CompletableFuture<Parent> future = new CompletableFuture<>();
+        CompletableFuture<FXMLLoader> future = new CompletableFuture<>();
 
         Platform.runLater(() -> {
             try {
                 FXMLLoader loader = new FXMLLoader(App.class.getResource("/com/laurosantos/clippr/ui/main-view.fxml"));
                 Parent root = loader.load();
-                future.complete(root);
+                new javafx.scene.Scene(root);
+                javafx.scene.control.TabPane tabPane = (javafx.scene.control.TabPane) root.lookup("#tabPane");
+                if (tabPane != null) {
+                    tabPane.getSelectionModel().select(1);
+                }
+                future.complete(loader);
             } catch (Throwable t) {
                 future.completeExceptionally(t);
             }
         });
 
-        Parent root = future.get(10, TimeUnit.SECONDS);
+        FXMLLoader loader = future.get(10, TimeUnit.SECONDS);
+        Parent root = loader.getRoot();
         assertNotNull(root, "A raiz da interface FXML deve ser carregada corretamente");
+        assertNotNull(loader.getController(), "MainController deve ser instanciado");
+
+        javafx.scene.control.TableView<?> videoTable = (javafx.scene.control.TableView<?>) root.lookup("#videoTableView");
+        assertNotNull(videoTable, "videoTableView deve existir");
+        assertNotNull(videoTable.getContextMenu(), "videoTableView deve possuir ContextMenu configurado");
+
+        javafx.scene.control.Button btnStart = (javafx.scene.control.Button) root.lookup("#btnStartPipeline");
+        assertNotNull(btnStart, "btnStartPipeline deve existir");
+        org.junit.jupiter.api.Assertions.assertFalse(btnStart.isDisable(), "btnStartPipeline deve iniciar habilitado");
     }
 }

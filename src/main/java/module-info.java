@@ -10,7 +10,15 @@ module com.laurosantos.clippr {
     requires java.net.http;
 
     requires org.slf4j;
+    requires org.jboss.logging;
     requires transitive jakarta.persistence;
+    requires jakarta.transaction;
+    requires com.fasterxml.classmate;
+    requires net.bytebuddy;
+    requires org.hibernate.commons.annotations;
+    requires jakarta.xml.bind;
+    requires org.glassfish.jaxb.runtime;
+    requires jakarta.inject;
     requires org.hibernate.orm.core;
     requires org.postgresql.jdbc;
     requires com.zaxxer.hikari;
@@ -18,7 +26,7 @@ module com.laurosantos.clippr {
 
     opens com.laurosantos.clippr to javafx.fxml, javafx.graphics;
     opens com.laurosantos.clippr.ui to javafx.fxml;
-    opens com.laurosantos.clippr.persistence.entities to org.hibernate.orm.core, jakarta.persistence;
+    opens com.laurosantos.clippr.persistence.entities;
     opens com.laurosantos.clippr.domain to com.fasterxml.jackson.databind;
     opens com.laurosantos.clippr.ai to com.fasterxml.jackson.databind;
 

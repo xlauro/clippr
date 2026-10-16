@@ -27,6 +27,8 @@ import java.util.List;
 
 public class MainController {
 
+    public MainController() {}
+
     private static final Logger logger = LoggerFactory.getLogger(MainController.class);
 
     @FXML private Label dbStatusBadge;

@@ -12,6 +12,8 @@ import java.io.IOException;
 
 public class App extends Application {
 
+    public App() {}
+
     @Override
     public void start(Stage stage) throws IOException {
         Application.setUserAgentStylesheet(new PrimerDark().getUserAgentStylesheet());

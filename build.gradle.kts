@@ -45,12 +45,33 @@ dependencies {
     implementation("org.slf4j:slf4j-api:2.0.17")
     implementation("ch.qos.logback:logback-classic:1.5.18")
 
-    // Testes
+    // Testes Unitários & Integração
     testImplementation(platform("org.junit:junit-bom:6.0.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+
+    // Testcontainers (PostgreSQL para testes determinísticos)
+    testImplementation(platform("org.testcontainers:testcontainers-bom:1.20.6"))
+    testImplementation("org.testcontainers:testcontainers")
+    testImplementation("org.testcontainers:junit-jupiter")
+    testImplementation("org.testcontainers:postgresql")
+}
+
+tasks.withType<JavaCompile> {
+    options.encoding = "UTF-8"
+    options.compilerArgs.addAll(listOf(
+        "-Xlint:all",
+        "-Xlint:-processing",
+        "-Xlint:-path",
+        "-Xlint:-requires-automatic"
+    ))
 }
 
 tasks.test {
     useJUnitPlatform()
+    val podmanSock = File("/run/user/1000/podman/podman.sock")
+    if (podmanSock.exists() && System.getenv("DOCKER_HOST") == null) {
+        environment("DOCKER_HOST", "unix://${podmanSock.absolutePath}")
+    }
+    environment("TESTCONTAINERS_RYUK_DISABLED", "true")
 }

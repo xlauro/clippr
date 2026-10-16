@@ -9,6 +9,8 @@ import java.util.List;
 
 public class SubtitleGenerator {
 
+    private SubtitleGenerator() {}
+
     public static Path generateAssSubtitles(
             List<TranscriptSegment> allSegments,
             double clipStartSeconds,

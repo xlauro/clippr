@@ -2,6 +2,8 @@ package com.laurosantos.clippr.ai;
 
 public class PromptFactory {
 
+    private PromptFactory() {}
+
     public static final String SYSTEM_INSTRUCTION = """
             Você é o diretor de conteúdo e especialista sênior em viralização de vídeos para redes sociais (TikTok, Instagram Reels e YouTube Shorts).
             Sua missão é analisar transcrições de vídeos do YouTube com marcações de tempo precisas e extrair APENAS momentos com altíssimo potencial de viralização.

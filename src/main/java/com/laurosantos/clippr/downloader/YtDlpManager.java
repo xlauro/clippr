@@ -46,7 +46,7 @@ public class YtDlpManager {
         return binaryPath;
     }
 
-    public synchronized Path resolveOrDownloadBinary() {
+    public static synchronized Path resolveOrDownloadBinary() {
         // 1. Verifica no PATH do sistema
         String pathEnv = System.getenv("PATH");
         if (pathEnv != null) {
@@ -78,7 +78,7 @@ public class YtDlpManager {
         return downloadStandaloneBinary(userClipprBin);
     }
 
-    private Path downloadStandaloneBinary(Path targetPath) {
+    private static Path downloadStandaloneBinary(Path targetPath) {
         try {
             logger.info("Baixando binário oficial do yt-dlp para {}", targetPath);
             EventBus.getInstance().publish(new ClipprEvent.LogMessage("Baixando ferramenta yt-dlp para processamento de vídeos...", false));

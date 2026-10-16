@@ -25,20 +25,18 @@ public class EventBus {
         return INSTANCE;
     }
 
-    @SuppressWarnings("unchecked")
     public <T extends ClipprEvent> void subscribe(Class<T> eventType, Consumer<T> listener) {
         listeners.computeIfAbsent(eventType, _ -> new CopyOnWriteArrayList<>())
-                .add((Consumer<? extends ClipprEvent>) listener);
+                .add(listener);
     }
 
-    @SuppressWarnings("unchecked")
     public void publish(ClipprEvent event) {
         virtualExecutor.submit(() -> {
             for (Map.Entry<Class<? extends ClipprEvent>, List<Consumer<? extends ClipprEvent>>> entry : listeners.entrySet()) {
                 if (entry.getKey().isInstance(event)) {
                     for (Consumer<? extends ClipprEvent> listener : entry.getValue()) {
                         try {
-                            ((Consumer<ClipprEvent>) listener).accept(event);
+                            dispatch(listener, event);
                         } catch (Exception ex) {
                             logger.error("Erro ao despachar evento {}: {}", event.getClass().getSimpleName(), ex.getMessage(), ex);
                         }
@@ -53,12 +51,17 @@ public class EventBus {
             if (entry.getKey().isInstance(event)) {
                 for (Consumer<? extends ClipprEvent> listener : entry.getValue()) {
                     try {
-                        ((Consumer<ClipprEvent>) listener).accept(event);
+                        dispatch(listener, event);
                     } catch (Exception ex) {
                         logger.error("Erro síncrono ao despachar evento {}: {}", event.getClass().getSimpleName(), ex.getMessage(), ex);
                     }
                 }
             }
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void dispatch(Consumer<? extends ClipprEvent> listener, ClipprEvent event) {
+        ((Consumer<ClipprEvent>) listener).accept(event);
     }
 }

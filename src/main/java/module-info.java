@@ -1,4 +1,5 @@
 module com.laurosantos.clippr {
+    requires transitive javafx.graphics;
     requires javafx.controls;
     requires javafx.fxml;
     requires javafx.media;
@@ -9,7 +10,7 @@ module com.laurosantos.clippr {
     requires java.net.http;
 
     requires org.slf4j;
-    requires jakarta.persistence;
+    requires transitive jakarta.persistence;
     requires org.hibernate.orm.core;
     requires org.postgresql.jdbc;
     requires com.zaxxer.hikari;

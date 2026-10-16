@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: clippr-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: clippr_db
+      POSTGRES_USER: clippr
+      POSTGRES_PASSWORD: clippr_secret_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - clippr_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clippr -d clippr_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  clippr_pgdata:
+    driver: local

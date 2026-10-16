@@ -1,0 +1,40 @@
+# Build e ferramentas
+build/
+.gradle/
+.idea/
+.vscode/
+out/
+bin/
+*.class
+*.jar
+*.war
+
+# Mídias pesadas (vídeos, áudios e renders temporários)
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.webm
+*.flv
+*.wmv
+*.mp3
+*.wav
+*.aac
+*.m4a
+*.flac
+*.ogg
+
+# Diretórios de processamento e exportação de mídia
+temp/
+output/
+exports/
+clips/
+renders/
+samples/
+*.tmp
+
+# Logs e dumps do sistema
+*.log
+*.dump
+hs_err_pid*.log
+.DS_Store

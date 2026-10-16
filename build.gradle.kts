@@ -1,0 +1,56 @@
+plugins {
+    java
+    application
+    id("org.openjfx.javafxplugin") version "0.1.0"
+}
+
+group = "com.laurosantos"
+version = "1.0-SNAPSHOT"
+
+repositories {
+    mavenCentral()
+}
+
+java {
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(25))
+    }
+}
+
+javafx {
+    version = "24.0.1"
+    modules = listOf("javafx.controls", "javafx.fxml", "javafx.media")
+}
+
+application {
+    mainModule.set("com.laurosantos.clippr")
+    mainClass.set("com.laurosantos.clippr.App")
+}
+
+dependencies {
+    // UI Theme
+    implementation("io.github.mkpaz:atlantafx-base:2.0.1")
+
+    // Database & Persistence (Versões mais recentes e estáveis)
+    implementation("org.postgresql:postgresql:42.7.7")
+    implementation("org.hibernate.orm:hibernate-core:6.6.14.Final")
+    implementation("com.zaxxer:HikariCP:6.3.0")
+    implementation("jakarta.persistence:jakarta.persistence-api:3.1.0")
+
+    // JSON & Serialization
+    implementation("com.fasterxml.jackson.core:jackson-databind:2.19.0")
+    implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.19.0")
+
+    // Logging & Observabilidade
+    implementation("org.slf4j:slf4j-api:2.0.17")
+    implementation("ch.qos.logback:logback-classic:1.5.18")
+
+    // Testes
+    testImplementation(platform("org.junit:junit-bom:6.0.0"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+tasks.test {
+    useJUnitPlatform()
+}

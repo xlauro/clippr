@@ -29,5 +29,6 @@ module com.laurosantos.clippr {
     exports com.laurosantos.clippr.ffmpeg;
     exports com.laurosantos.clippr.persistence;
     exports com.laurosantos.clippr.persistence.entities;
+    exports com.laurosantos.clippr.pipeline;
     exports com.laurosantos.clippr.ui;
 }

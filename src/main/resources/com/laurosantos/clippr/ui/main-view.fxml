@@ -1,64 +1,179 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <?import javafx.geometry.Insets?>
-<?import javafx.scene.control.Button?>
-<?import javafx.scene.control.Label?>
-<?import javafx.scene.control.ProgressBar?>
-<?import javafx.scene.control.Separator?>
-<?import javafx.scene.control.TextArea?>
-<?import javafx.scene.layout.BorderPane?>
-<?import javafx.scene.layout.HBox?>
-<?import javafx.scene.layout.Priority?>
-<?import javafx.scene.layout.VBox?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
 
 <BorderPane xmlns="http://javafx.com/javafx/21"
             xmlns:fx="http://javafx.com/fxml/1"
             fx:controller="com.laurosantos.clippr.ui.MainController"
-            prefWidth="960.0" prefHeight="600.0">
+            prefWidth="1100.0" prefHeight="750.0">
+
     <padding>
-        <Insets top="20.0" right="24.0" bottom="20.0" left="24.0" />
+        <Insets top="14.0" right="18.0" bottom="14.0" left="18.0" />
     </padding>
 
+    <!-- Top Header -->
     <top>
-        <VBox spacing="10.0">
-            <HBox alignment="CENTER_LEFT" spacing="12.0">
-                <Label text="Clippr" style="-fx-font-size: 24px; -fx-font-weight: bold;" />
-                <Label text="AI &amp; FFmpeg Video Editor" style="-fx-text-fill: -color-fg-muted; -fx-font-size: 14px;" />
+        <VBox spacing="8.0">
+            <HBox alignment="CENTER_LEFT" spacing="14.0">
+                <Label text="✂ Clippr" style="-fx-font-size: 22px; -fx-font-weight: bold;" />
+                <Label text="AI &amp; FFmpeg Video Clipper (Java 25)" style="-fx-text-fill: -color-fg-muted; -fx-font-size: 13px;" />
+                <Region HBox.hgrow="ALWAYS" />
+                <Label fx:id="dbStatusBadge" text="● PostgreSQL: Conectando..." style="-fx-font-size: 12px; -fx-text-fill: -color-warning-fg;" />
+                <Label fx:id="ffmpegStatusBadge" text="● FFmpeg: OK" style="-fx-font-size: 12px; -fx-text-fill: -color-success-fg;" />
             </HBox>
             <Separator />
         </VBox>
     </top>
 
+    <!-- Center Tabs -->
     <center>
-        <VBox spacing="16.0">
+        <TabPane fx:id="tabPane" tabClosingPolicy="UNAVAILABLE">
             <BorderPane.margin>
-                <Insets top="16.0" bottom="16.0" />
+                <Insets top="10.0" bottom="10.0" />
             </BorderPane.margin>
 
-            <HBox spacing="12.0" alignment="CENTER_LEFT">
-                <Button fx:id="selectFileButton" text="Escolher Vídeo" onAction="#onSelectFile" styleClass="accent" />
-                <Label fx:id="selectedFileLabel" text="Nenhum arquivo selecionado" style="-fx-text-fill: -color-fg-muted;" />
-            </HBox>
+            <!-- TAB 1: FILA DE VÍDEOS -->
+            <Tab text="📺 Fila de Vídeos">
+                <VBox spacing="12.0">
+                    <padding>
+                        <Insets top="12.0" right="8.0" bottom="8.0" left="8.0" />
+                    </padding>
 
-            <HBox spacing="12.0" alignment="CENTER_LEFT">
-                <Button fx:id="processButton" text="Processar com IA &amp; FFmpeg" onAction="#onProcessVideo" styleClass="success" />
-            </HBox>
+                    <!-- Adicionar Link -->
+                    <HBox spacing="10.0" alignment="CENTER_LEFT">
+                        <TextField fx:id="linkInputField" promptText="Cole o link do YouTube aqui (ex: https://www.youtube.com/watch?v=...)"
+                                   HBox.hgrow="ALWAYS" onAction="#onAddLink" />
+                        <Button text="+ Adicionar à Fila" onAction="#onAddLink" styleClass="accent" />
+                    </HBox>
 
-            <VBox spacing="6.0" VBox.vgrow="ALWAYS">
-                <Label text="Console de Execução:" style="-fx-font-weight: bold;" />
-                <TextArea fx:id="logArea" editable="false" wrapText="true" VBox.vgrow="ALWAYS"
-                          style="-fx-font-family: monospace;" />
-            </VBox>
-        </VBox>
+                    <!-- Tabela de Vídeos na Fila -->
+                    <TableView fx:id="videoTableView" VBox.vgrow="ALWAYS">
+                        <columns>
+                            <TableColumn fx:id="colVideoTitle" text="Título / URL" prefWidth="420.0" />
+                            <TableColumn fx:id="colVideoAuthor" text="Canal" prefWidth="180.0" />
+                            <TableColumn fx:id="colVideoDuration" text="Duração" prefWidth="100.0" />
+                            <TableColumn fx:id="colVideoStatus" text="Status" prefWidth="220.0" />
+                        </columns>
+                        <placeholder>
+                            <Label text="Nenhum link adicionado. Cole um link do YouTube acima e clique em 'Adicionar à Fila'." />
+                        </placeholder>
+                    </TableView>
+
+                    <!-- Barra de Configurações Rápidas -->
+                    <HBox spacing="16.0" alignment="CENTER_LEFT" style="-fx-background-color: -color-bg-subtle; -fx-padding: 10px; -fx-background-radius: 6px;">
+                        <CheckBox fx:id="chkSubtitles" text="Legendas Dinâmicas (.ass)" selected="true" />
+                        <CheckBox fx:id="chkAutoProcess" text="Processar Automaticamente (Score &gt;= 90)" />
+                        <Separator orientation="VERTICAL" />
+                        <Label text="Orientação:" />
+                        <ComboBox fx:id="comboOrientation" prefWidth="200.0" />
+                        <Region HBox.hgrow="ALWAYS" />
+                        <Button text="🗑 Limpar Fila" onAction="#onClearQueue" />
+                        <Button fx:id="btnStartPipeline" text="▶ Iniciar Processamento" onAction="#onStartPipeline" styleClass="success" />
+                    </HBox>
+                </VBox>
+            </Tab>
+
+            <!-- TAB 2: CORTES DETECTADOS -->
+            <Tab text="🎬 Cortes &amp; Momentos Virais">
+                <VBox spacing="12.0">
+                    <padding>
+                        <Insets top="12.0" right="8.0" bottom="8.0" left="8.0" />
+                    </padding>
+
+                    <HBox spacing="12.0" alignment="CENTER_LEFT">
+                        <Label text="Momentos com alto potencial de viralização identificados pela IA:" style="-fx-font-weight: bold;" />
+                        <Region HBox.hgrow="ALWAYS" />
+                        <Button text="⚡ Renderizar Todos Aprovados (100% CPU)" onAction="#onRenderAllApproved" styleClass="accent" />
+                    </HBox>
+
+                    <TableView fx:id="clipTableView" VBox.vgrow="ALWAYS">
+                        <columns>
+                            <TableColumn fx:id="colClipScore" text="Score" prefWidth="80.0" />
+                            <TableColumn fx:id="colClipTitle" text="Título do Corte" prefWidth="300.0" />
+                            <TableColumn fx:id="colClipHook" text="Gancho (Primeiros 3s)" prefWidth="260.0" />
+                            <TableColumn fx:id="colClipTime" text="Intervalo / Duração" prefWidth="140.0" />
+                            <TableColumn fx:id="colClipOrientation" text="Formato" prefWidth="100.0" />
+                            <TableColumn fx:id="colClipStatus" text="Status" prefWidth="140.0" />
+                        </columns>
+                        <placeholder>
+                            <Label text="Nenhum corte gerado ainda. Processe um vídeo na aba 'Fila de Vídeos'." />
+                        </placeholder>
+                    </TableView>
+                </VBox>
+            </Tab>
+
+            <!-- TAB 3: CONFIGURAÇÕES & DIAGNÓSTICO -->
+            <Tab text="⚙ Configurações &amp; Ambiente">
+                <VBox spacing="16.0">
+                    <padding>
+                        <Insets top="16.0" right="16.0" bottom="16.0" left="16.0" />
+                    </padding>
+
+                    <VBox spacing="8.0">
+                        <Label text="Chave de API do Google Gemini:" style="-fx-font-weight: bold;" />
+                        <HBox spacing="10.0">
+                            <PasswordField fx:id="geminiApiKeyField" promptText="Cole sua chave GEMINI_API_KEY aqui" HBox.hgrow="ALWAYS" />
+                            <Button text="Salvar Chave" onAction="#onSaveApiKey" styleClass="accent" />
+                        </HBox>
+                        <Label text="A chave pode ser configurada aqui ou via variável de ambiente GEMINI_API_KEY." style="-fx-text-fill: -color-fg-muted; -fx-font-size: 11px;" />
+                    </VBox>
+
+                    <VBox spacing="8.0">
+                        <Label text="Pasta de Exportação dos Vídeos:" style="-fx-font-weight: bold;" />
+                        <HBox spacing="10.0">
+                            <TextField fx:id="outputDirField" HBox.hgrow="ALWAYS" />
+                            <Button text="Escolher Pasta..." onAction="#onBrowseOutputDir" />
+                        </HBox>
+                    </VBox>
+
+                    <Separator />
+
+                    <VBox spacing="10.0">
+                        <Label text="Diagnóstico de Componentes do Sistema:" style="-fx-font-weight: bold;" />
+                        <GridPane hgap="14.0" vgap="8.0">
+                            <Label text="PostgreSQL (Docker):" GridPane.columnIndex="0" GridPane.rowIndex="0" />
+                            <Label fx:id="diagPostgresLabel" text="Verificando..." GridPane.columnIndex="1" GridPane.rowIndex="0" />
+                            <Button text="Subir Docker Compose" onAction="#onStartDockerCompose" GridPane.columnIndex="2" GridPane.rowIndex="0" />
+
+                            <Label text="FFmpeg:" GridPane.columnIndex="0" GridPane.rowIndex="1" />
+                            <Label fx:id="diagFfmpegLabel" text="Verificando..." GridPane.columnIndex="1" GridPane.rowIndex="1" />
+
+                            <Label text="yt-dlp:" GridPane.columnIndex="0" GridPane.rowIndex="2" />
+                            <Label fx:id="diagYtDlpLabel" text="Verificando..." GridPane.columnIndex="1" GridPane.rowIndex="2" />
+                        </GridPane>
+                    </VBox>
+                </VBox>
+            </Tab>
+        </TabPane>
     </center>
 
+    <!-- Bottom Section: Logs & Progress -->
     <bottom>
         <VBox spacing="8.0">
             <Separator />
-            <HBox alignment="CENTER_LEFT" spacing="16.0">
-                <Label fx:id="statusLabel" text="Inicializando..." HBox.hgrow="ALWAYS" />
-                <ProgressBar fx:id="progressBar" prefWidth="200.0" progress="0.0" />
+
+            <!-- Barras de Progresso e Status -->
+            <HBox spacing="14.0" alignment="CENTER_LEFT">
+                <Label fx:id="statusLabel" text="Pronto para processar vídeos" HBox.hgrow="ALWAYS"
+                       style="-fx-font-weight: bold;" />
+                <Region HBox.hgrow="ALWAYS" />
+                <Label text="Progresso:" style="-fx-text-fill: -color-fg-muted;" />
+                <ProgressBar fx:id="progressBar" prefWidth="260.0" progress="0.0" />
             </HBox>
+
+            <!-- Console de Logs com Toggle Amigável / Debug -->
+            <VBox spacing="4.0">
+                <HBox spacing="12.0" alignment="CENTER_LEFT">
+                    <Label text="Console de Execução:" style="-fx-font-size: 12px; -fx-font-weight: bold;" />
+                    <Region HBox.hgrow="ALWAYS" />
+                    <CheckBox fx:id="chkDebugMode" text="Modo Detalhado (Debug FFmpeg/yt-dlp)" />
+                    <Button text="Limpar Console" onAction="#onClearLogs" style="-fx-font-size: 11px;" />
+                </HBox>
+                <TextArea fx:id="logArea" prefHeight="130.0" editable="false" wrapText="true"
+                          style="-fx-font-family: monospace; -fx-font-size: 12px;" />
+            </VBox>
         </VBox>
     </bottom>
 </BorderPane>

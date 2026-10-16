@@ -88,6 +88,9 @@
 
                         <HBox spacing="10.0" alignment="CENTER_LEFT">
                             <Label text="Momentos Virais Detectados:" style="-fx-font-weight: bold;" />
+                            <Separator orientation="VERTICAL" />
+                            <Label text="Filtrar:" style="-fx-text-fill: -color-fg-muted;" />
+                            <ComboBox fx:id="comboClipFilter" prefWidth="160.0" onAction="#onFilterClipsChanged" />
                             <Region HBox.hgrow="ALWAYS" />
                             <Button text="▶ Renderizar Selecionado" onAction="#onRenderSelectedClip" styleClass="accent" />
                             <Button text="⚡ Renderizar Todos (100% CPU)" onAction="#onRenderAllApproved" styleClass="success" />
@@ -95,12 +98,13 @@
 
                         <TableView fx:id="clipTableView" VBox.vgrow="ALWAYS">
                             <columns>
+                                <TableColumn fx:id="colClipType" text="Tipo" prefWidth="90.0" />
                                 <TableColumn fx:id="colClipScore" text="Score" prefWidth="75.0" />
-                                <TableColumn fx:id="colClipTitle" text="Título do Corte" prefWidth="200.0" />
-                                <TableColumn fx:id="colClipHook" text="Gancho (3s)" prefWidth="180.0" />
-                                <TableColumn fx:id="colClipTime" text="Intervalo" prefWidth="110.0" />
+                                <TableColumn fx:id="colClipTitle" text="Título do Corte" prefWidth="180.0" />
+                                <TableColumn fx:id="colClipHook" text="Gancho (3s)" prefWidth="160.0" />
+                                <TableColumn fx:id="colClipTime" text="Intervalo" prefWidth="160.0" />
                                 <TableColumn fx:id="colClipOrientation" text="Formato" prefWidth="80.0" />
-                                <TableColumn fx:id="colClipStatus" text="Status" prefWidth="110.0" />
+                                <TableColumn fx:id="colClipStatus" text="Status" prefWidth="100.0" />
                             </columns>
                             <placeholder>
                                 <Label text="Nenhum corte gerado ainda. Processe um vídeo na aba 'Fila de Vídeos'." />

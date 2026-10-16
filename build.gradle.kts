@@ -77,6 +77,7 @@ tasks.withType<JavaCompile> {
 
 tasks.test {
     useJUnitPlatform()
+    maxParallelForks = 1
     val podmanSock = File("/run/user/1000/podman/podman.sock")
     if (podmanSock.exists() && System.getenv("DOCKER_HOST") == null) {
         environment("DOCKER_HOST", "unix://${podmanSock.absolutePath}")

@@ -20,6 +20,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 
 public class GeminiClient {
 
@@ -29,33 +30,49 @@ public class GeminiClient {
 
     private final String apiKey;
     private final String modelName;
+    private final String fallbackModelName;
     private final HttpClient httpClient;
-    private final int maxRetries;
+    private final int attemptsPerModel;
+    private final int maxCycles;
     private final long initialBackoffMs;
+    private final long maxBackoffMs;
     private final String baseUrl;
 
     public record AnalysisResult(List<ClipCandidate> approvedClips, List<ClipCandidate> discardedClips) {}
 
     public GeminiClient(String apiKey, String modelName) {
-        this(apiKey, modelName, HttpClient.newBuilder()
+        this(apiKey, modelName, "gemini-3.7-flash", HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(30))
-                .build(), 5, 2000L, DEFAULT_BASE_URL);
+                .build(), 10, 5, 800L, 3500L, DEFAULT_BASE_URL);
     }
 
     public GeminiClient(String apiKey, String modelName, HttpClient httpClient) {
-        this(apiKey, modelName, httpClient, 5, 2000L, DEFAULT_BASE_URL);
+        this(apiKey, modelName, "gemini-3.7-flash", httpClient, 10, 5, 800L, 3500L, DEFAULT_BASE_URL);
     }
 
-    public GeminiClient(String apiKey, String modelName, HttpClient httpClient, int maxRetries, long initialBackoffMs) {
-        this(apiKey, modelName, httpClient, maxRetries, initialBackoffMs, DEFAULT_BASE_URL);
+    public GeminiClient(String apiKey, String modelName, HttpClient httpClient, int attemptsPerModel, long initialBackoffMs, String baseUrl) {
+        this(apiKey, modelName, "gemini-3.7-flash", httpClient, attemptsPerModel, 5, initialBackoffMs, 3500L, baseUrl);
     }
 
-    public GeminiClient(String apiKey, String modelName, HttpClient httpClient, int maxRetries, long initialBackoffMs, String baseUrl) {
+    public GeminiClient(
+            String apiKey,
+            String modelName,
+            String fallbackModelName,
+            HttpClient httpClient,
+            int attemptsPerModel,
+            int maxCycles,
+            long initialBackoffMs,
+            long maxBackoffMs,
+            String baseUrl
+    ) {
         this.apiKey = apiKey != null ? apiKey.trim() : "";
         this.modelName = (modelName != null && !modelName.isBlank()) ? modelName.trim() : "gemini-3.8-flash";
+        this.fallbackModelName = (fallbackModelName != null && !fallbackModelName.isBlank()) ? fallbackModelName.trim() : "gemini-3.7-flash";
         this.httpClient = httpClient != null ? httpClient : HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).build();
-        this.maxRetries = maxRetries > 0 ? maxRetries : 1;
-        this.initialBackoffMs = initialBackoffMs > 0 ? initialBackoffMs : 500L;
+        this.attemptsPerModel = attemptsPerModel > 0 ? attemptsPerModel : 10;
+        this.maxCycles = maxCycles > 0 ? maxCycles : 5;
+        this.initialBackoffMs = initialBackoffMs > 0 ? initialBackoffMs : 800L;
+        this.maxBackoffMs = maxBackoffMs > 0 ? maxBackoffMs : 3500L;
         this.baseUrl = (baseUrl != null && !baseUrl.isBlank()) ? baseUrl : DEFAULT_BASE_URL;
     }
 
@@ -82,87 +99,124 @@ public class GeminiClient {
         EventBus.getInstance().publish(new ClipprEvent.LogMessage("Enviando transcrição para análise de viralização via Gemini...", false));
 
         String requestBody = buildRequestBody(userPrompt);
-        String endpoint = "%s/%s:generateContent?key=%s".formatted(baseUrl, modelName, apiKey);
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(endpoint))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-                .timeout(Duration.ofMinutes(2))
-                .build();
-
-        HttpResponse<String> response = null;
-
-        for (int attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-                response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            } catch (java.io.IOException e) {
-                if (attempt == maxRetries) {
-                    String netErr = "Falha de conexão ao comunicar com a API Gemini após %d tentativas: %s".formatted(maxRetries, e.getMessage());
-                    logger.error(netErr, e);
-                    EventBus.getInstance().publish(new ClipprEvent.LogMessage(netErr, false));
-                    throw new RuntimeException(netErr, e);
-                }
-                long jitter = java.util.concurrent.ThreadLocalRandom.current().nextLong(500, 1500);
-                long backoffMs = (long) (initialBackoffMs * Math.pow(2, attempt - 1)) + jitter;
-                String retryMsg = "[Gemini %s] Falha de conexão (%s). Tentativa %d de %d em %.1fs...".formatted(
-                        modelName, e.getMessage(), attempt + 1, maxRetries, backoffMs / 1000.0);
-                logger.warn(retryMsg);
-                EventBus.getInstance().publish(new ClipprEvent.LogMessage(retryMsg, false));
-                EventBus.getInstance().publish(new ClipprEvent.ProgressUpdated(0.4, "Reconectando Gemini (%d/%d em %.0fs)...".formatted(attempt + 1, maxRetries, backoffMs / 1000.0)));
-                try {
-                    Thread.sleep(backoffMs);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    throw new RuntimeException("Processamento cancelado durante retry do Gemini", ie);
-                }
-                continue;
-            }
-
-            int statusCode = response.statusCode();
-            if (statusCode == 200) {
-                if (attempt > 1) {
-                    String successMsg = "[Gemini %s] Resposta recebida com sucesso na tentativa %d!".formatted(modelName, attempt);
-                    logger.info(successMsg);
-                    EventBus.getInstance().publish(new ClipprEvent.LogMessage(successMsg, false));
-                }
-                break;
-            }
-
-            if ((statusCode == 503 || statusCode == 429) && attempt < maxRetries) {
-                String reason = statusCode == 503 ? "Alta demanda temporária (HTTP 503)" : "Limite de requisições excedido (HTTP 429)";
-                long jitter = java.util.concurrent.ThreadLocalRandom.current().nextLong(500, 1500);
-                long backoffMs = (long) (initialBackoffMs * Math.pow(2, attempt - 1)) + jitter;
-                String retryMsg = "[Gemini %s] %s. Aguardando %.1fs antes da tentativa %d de %d...".formatted(
-                        modelName, reason, backoffMs / 1000.0, attempt + 1, maxRetries);
-                logger.warn(retryMsg);
-                EventBus.getInstance().publish(new ClipprEvent.LogMessage(retryMsg, false));
-                EventBus.getInstance().publish(new ClipprEvent.ProgressUpdated(0.4, "Gemini ocupado (%d). Nova tentativa %d/%d em %.0fs...".formatted(statusCode, attempt + 1, maxRetries, backoffMs / 1000.0)));
-
-                try {
-                    Thread.sleep(backoffMs);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    throw new RuntimeException("Processamento cancelado durante retry do Gemini", ie);
-                }
-                continue;
-            }
-
-            String errorMsg;
-            if (statusCode == 503) {
-                errorMsg = "O modelo %s está temporariamente com alta demanda no Google (HTTP 503 após %d tentativas). Tente novamente em alguns instantes.".formatted(modelName, maxRetries);
-            } else if (statusCode == 429) {
-                errorMsg = "Limite de taxa (HTTP 429) excedido na API Gemini após %d tentativas. Tente novamente em alguns instantes.".formatted(maxRetries);
-            } else {
-                errorMsg = "Erro na API Gemini (HTTP %d): %s".formatted(statusCode, response.body());
-            }
-
-            logger.error(errorMsg);
-            EventBus.getInstance().publish(new ClipprEvent.LogMessage(errorMsg, true));
-            throw new RuntimeException(errorMsg);
+        List<String> models = new ArrayList<>();
+        models.add(modelName);
+        if (!fallbackModelName.equalsIgnoreCase(modelName)) {
+            models.add(fallbackModelName);
         }
 
-        List<ClipCandidate> rawCandidates = parseGeminiResponse(videoSourceId, response.body());
+        HttpResponse<String> successfulResponse = null;
+        String successfulModel = null;
+        String lastErrorMsg = null;
+
+        cycleLoop:
+        for (int cycle = 1; cycle <= maxCycles; cycle++) {
+            for (int mIndex = 0; mIndex < models.size(); mIndex++) {
+                String currentModel = models.get(mIndex);
+                String startMsg = "[Gemini] Conectando ao modelo %s (Tentativa %d de %d ciclos)...".formatted(currentModel, cycle, maxCycles);
+                logger.info(startMsg);
+                EventBus.getInstance().publish(new ClipprEvent.LogMessage(startMsg, false));
+
+                String endpoint = "%s/%s:generateContent?key=%s".formatted(baseUrl, currentModel, apiKey);
+                HttpRequest request = HttpRequest.newBuilder()
+                        .uri(URI.create(endpoint))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                        .timeout(Duration.ofMinutes(2))
+                        .build();
+
+                for (int attempt = 1; attempt <= attemptsPerModel; attempt++) {
+                    HttpResponse<String> response = null;
+                    try {
+                        response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                    } catch (java.io.IOException e) {
+                        lastErrorMsg = e.getMessage();
+                        if (attempt == attemptsPerModel) {
+                            String connErr = "[Gemini %s] Falha de conexão na tentativa %d: %s".formatted(currentModel, attempt, e.getMessage());
+                            logger.warn(connErr);
+                            EventBus.getInstance().publish(new ClipprEvent.LogMessage(connErr, false));
+                            break; // Esgotou tentativas neste modelo, avança para o próximo
+                        }
+                        long base = Math.min(maxBackoffMs, (long) (initialBackoffMs * Math.pow(1.3, attempt - 1)));
+                        long jitter = ThreadLocalRandom.current().nextLong(100, 500);
+                        long backoffMs = base + jitter;
+                        String retryMsg = "[Gemini %s] Falha de conexão (%s). Tentativa %d de %d em %.1fs (Ciclo %d/%d)...".formatted(
+                                currentModel, e.getMessage(), attempt + 1, attemptsPerModel, backoffMs / 1000.0, cycle, maxCycles);
+                        logger.warn(retryMsg);
+                        EventBus.getInstance().publish(new ClipprEvent.LogMessage(retryMsg, false));
+                        EventBus.getInstance().publish(new ClipprEvent.ProgressUpdated(0.4, "Reconectando %s (%d/%d em %.1fs)...".formatted(currentModel, attempt + 1, attemptsPerModel, backoffMs / 1000.0)));
+                        try {
+                            Thread.sleep(backoffMs);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            throw new RuntimeException("Processamento cancelado durante retry", ie);
+                        }
+                        continue;
+                    }
+
+                    int statusCode = response.statusCode();
+                    if (statusCode == 200) {
+                        successfulResponse = response;
+                        successfulModel = currentModel;
+                        String successMsg = "[Gemini %s] Resposta recebida com sucesso na tentativa %d do ciclo %d!".formatted(currentModel, attempt, cycle);
+                        logger.info(successMsg);
+                        EventBus.getInstance().publish(new ClipprEvent.LogMessage(successMsg, false));
+                        break cycleLoop;
+                    }
+
+                    if (statusCode == 503 || statusCode == 429) {
+                        String reason = statusCode == 503 ? "Alta demanda temporária (503)" : "Limite de requisições excedido (429)";
+                        lastErrorMsg = reason;
+                        if (attempt < attemptsPerModel) {
+                            long base = Math.min(maxBackoffMs, (long) (initialBackoffMs * Math.pow(1.3, attempt - 1)));
+                            long jitter = ThreadLocalRandom.current().nextLong(100, 500);
+                            long backoffMs = base + jitter;
+                            String retryMsg = "[Gemini %s] %s. Tentativa %d de %d em %.1fs (Ciclo %d/%d)...".formatted(
+                                    currentModel, reason, attempt + 1, attemptsPerModel, backoffMs / 1000.0, cycle, maxCycles);
+                            logger.warn(retryMsg);
+                            EventBus.getInstance().publish(new ClipprEvent.LogMessage(retryMsg, false));
+                            EventBus.getInstance().publish(new ClipprEvent.ProgressUpdated(0.4, "%s ocupado (%d). Tentativa %d/%d em %.1fs...".formatted(currentModel, statusCode, attempt + 1, attemptsPerModel, backoffMs / 1000.0)));
+                            try {
+                                Thread.sleep(backoffMs);
+                            } catch (InterruptedException ie) {
+                                Thread.currentThread().interrupt();
+                                throw new RuntimeException("Processamento cancelado durante retry", ie);
+                            }
+                        } else {
+                            String nextModel = (mIndex + 1 < models.size()) ? models.get(mIndex + 1) : models.get(0);
+                            int nextCycle = (mIndex + 1 < models.size()) ? cycle : cycle + 1;
+                            String exhaustMsg = "[Gemini %s] %d tentativas esgotadas por %s. Alternando para o modelo %s (Ciclo %d/%d)...".formatted(
+                                    currentModel, attemptsPerModel, reason, nextModel, Math.min(nextCycle, maxCycles), maxCycles);
+                            logger.warn(exhaustMsg);
+                            EventBus.getInstance().publish(new ClipprEvent.LogMessage(exhaustMsg, false));
+                            EventBus.getInstance().publish(new ClipprEvent.ProgressUpdated(0.4, "Alternando para %s...".formatted(nextModel)));
+                            try {
+                                Thread.sleep(500L);
+                            } catch (InterruptedException ie) {
+                                Thread.currentThread().interrupt();
+                                throw new RuntimeException("Processamento cancelado durante alternância", ie);
+                            }
+                        }
+                    } else {
+                        String fatalError = "Erro na API Gemini (HTTP %d): %s".formatted(statusCode, response.body());
+                        logger.error(fatalError);
+                        EventBus.getInstance().publish(new ClipprEvent.LogMessage(fatalError, true));
+                        throw new RuntimeException(fatalError);
+                    }
+                }
+            }
+        }
+
+        if (successfulResponse == null) {
+            String exhaustedAll = "Todos os modelos testados (%s) apresentaram sobrecarga persistente após %d ciclos de %d tentativas. Último erro: %s. Tente novamente em instantes.".formatted(
+                    String.join(", ", models), maxCycles, attemptsPerModel, lastErrorMsg);
+            logger.error(exhaustedAll);
+            EventBus.getInstance().publish(new ClipprEvent.LogMessage(exhaustedAll, true));
+            throw new RuntimeException(exhaustedAll);
+        }
+
+        List<ClipCandidate> rawCandidates = parseGeminiResponse(videoSourceId, successfulResponse.body());
         List<ClipCandidate> snappedCandidates = snapToSegmentBoundaries(rawCandidates, segments);
 
         List<ClipCandidate> approved = new ArrayList<>();
@@ -189,7 +243,11 @@ public class GeminiClient {
                         candidate.hasSubtitles(),
                         candidate.outputFilePath(),
                         candidate.metadataJsonPath(),
-                        ProcessingStatus.DISCARDED_LOW_SCORE
+                        ProcessingStatus.DISCARDED_LOW_SCORE,
+                        candidate.thumbnailTimestamp(),
+                        candidate.thumbnailHeadline(),
+                        candidate.thumbnailPath(),
+                        candidate.rawFramePath()
                 ));
                 logger.info("Corte descartado (Score {} < {}): \"{}\"",
                         candidate.viralityScore(), minViralityThreshold, candidate.title());
@@ -265,6 +323,29 @@ public class GeminiClient {
                 for (JsonNode t : tagsNode) tags.add(t.asText());
             }
 
+            Double thumbnailTimestamp = null;
+            if (item.hasNonNull("thumbnailTimestamp")) {
+                double rawTs = item.path("thumbnailTimestamp").asDouble(startSeconds);
+                if (rawTs >= startSeconds && rawTs <= endSeconds) {
+                    thumbnailTimestamp = rawTs;
+                } else {
+                    thumbnailTimestamp = startSeconds;
+                }
+            } else {
+                thumbnailTimestamp = startSeconds;
+            }
+
+            String thumbnailHeadline = null;
+            if (item.hasNonNull("thumbnailHeadline")) {
+                String hl = item.path("thumbnailHeadline").asText().trim();
+                if (!hl.isBlank()) {
+                    thumbnailHeadline = hl;
+                }
+            }
+            if (thumbnailHeadline == null) {
+                thumbnailHeadline = title;
+            }
+
             if (endSeconds > startSeconds) {
                 list.add(new ClipCandidate(
                         null,
@@ -281,7 +362,11 @@ public class GeminiClient {
                         true,
                         null,
                         null,
-                        ProcessingStatus.PENDING_APPROVAL
+                        ProcessingStatus.PENDING_APPROVAL,
+                        thumbnailTimestamp,
+                        thumbnailHeadline,
+                        null,
+                        null
                 ));
             }
         }
@@ -298,6 +383,15 @@ public class GeminiClient {
             double end = findClosestBoundary(c.endSeconds(), segments, false);
             if (end <= start) end = start + c.durationSeconds();
 
+            Double thumbTs = c.thumbnailTimestamp();
+            if (thumbTs != null) {
+                if (thumbTs < start || thumbTs > end) {
+                    thumbTs = start;
+                }
+            } else {
+                thumbTs = start;
+            }
+
             snappedList.add(new ClipCandidate(
                     c.id(),
                     c.videoSourceId(),
@@ -313,7 +407,11 @@ public class GeminiClient {
                     c.hasSubtitles(),
                     c.outputFilePath(),
                     c.metadataJsonPath(),
-                    c.status()
+                    c.status(),
+                    thumbTs,
+                    c.thumbnailHeadline(),
+                    c.thumbnailPath(),
+                    c.rawFramePath()
             ));
         }
         return snappedList;

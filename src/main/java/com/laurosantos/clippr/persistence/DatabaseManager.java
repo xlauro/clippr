@@ -156,7 +156,8 @@ public class DatabaseManager {
                         videoSourceId, c.title(), c.hook(), c.startSeconds(), c.endSeconds(),
                         c.viralityScore(), c.reasoning(), c.suggestedCaption(), c.hashtags(),
                         c.orientation(), c.hasSubtitles(), c.outputFilePath(), c.metadataJsonPath(),
-                        c.status()
+                        c.status(),
+                        c.thumbnailTimestamp(), c.thumbnailHeadline(), c.thumbnailPath(), c.rawFramePath()
                 ));
             }
             return fallback;
@@ -227,6 +228,32 @@ public class DatabaseManager {
         } finally {
             em.close();
         }
+    }
+
+    public void updateClipThumbnail(Long clipId, Double timestamp, String headline, String thumbnailPath, String rawFramePath) {
+        if (!init() || clipId == null) return;
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            em.getTransaction().begin();
+            ClipEntity entity = em.find(ClipEntity.class, clipId);
+            if (entity != null) {
+                if (timestamp != null) entity.setThumbnailTimestamp(timestamp);
+                if (headline != null) entity.setThumbnailHeadline(headline);
+                if (thumbnailPath != null) entity.setThumbnailPath(thumbnailPath);
+                if (rawFramePath != null) entity.setRawFramePath(rawFramePath);
+                em.merge(entity);
+            }
+            em.getTransaction().commit();
+        } catch (Exception e) {
+            if (em.getTransaction().isActive()) em.getTransaction().rollback();
+            logger.error("Erro ao atualizar thumbnail do clipe {}: {}", clipId, e.getMessage(), e);
+        } finally {
+            em.close();
+        }
+    }
+
+    public void updateClipThumbnail(Long clipId, String thumbnailPath, String rawFramePath) {
+        updateClipThumbnail(clipId, null, null, thumbnailPath, rawFramePath);
     }
 
     public void deleteVideo(Long videoId) {

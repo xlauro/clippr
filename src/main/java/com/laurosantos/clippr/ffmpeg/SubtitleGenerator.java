@@ -1,5 +1,6 @@
 package com.laurosantos.clippr.ffmpeg;
 
+import com.laurosantos.clippr.domain.OrientationMode;
 import com.laurosantos.clippr.downloader.TranscriptSegment;
 
 import java.io.IOException;
@@ -17,24 +18,41 @@ public class SubtitleGenerator {
             double clipEndSeconds,
             Path targetAssFile
     ) throws IOException {
+        return generateAssSubtitles(allSegments, clipStartSeconds, clipEndSeconds, OrientationMode.VERTICAL_9_16, targetAssFile);
+    }
+
+    public static Path generateAssSubtitles(
+            List<TranscriptSegment> allSegments,
+            double clipStartSeconds,
+            double clipEndSeconds,
+            OrientationMode orientation,
+            Path targetAssFile
+    ) throws IOException {
+        OrientationMode mode = orientation != null ? orientation : OrientationMode.VERTICAL_9_16;
+
+        int playResX = (mode == OrientationMode.HORIZONTAL_16_9) ? 1920 : 1080;
+        int playResY = (mode == OrientationMode.HORIZONTAL_16_9) ? 1080 : 1920;
+        int fontSize = (mode == OrientationMode.HORIZONTAL_16_9) ? 48 : 64;
+        int marginV = (mode == OrientationMode.HORIZONTAL_16_9) ? 80 : 280;
+
         StringBuilder ass = new StringBuilder();
 
         // Cabeçalho do arquivo ASS
         ass.append("""
                 [Script Info]
                 ScriptType: v4.00+
-                PlayResX: 1080
-                PlayResY: 1920
+                PlayResX: %d
+                PlayResY: %d
                 WrapStyle: 0
                 ScaledBorderAndShadow: yes
 
                 [V4+ Styles]
                 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-                Style: Viral,Arial Black,64,&H0000FFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,6,2,2,40,40,280,1
+                Style: Viral,Arial Black,%d,&H0000FFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,6,2,2,40,40,%d,1
 
                 [Events]
                 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-                """);
+                """.formatted(playResX, playResY, fontSize, marginV));
 
         if (allSegments != null) {
             for (TranscriptSegment seg : allSegments) {

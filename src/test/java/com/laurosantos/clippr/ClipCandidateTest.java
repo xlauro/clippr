@@ -66,4 +66,108 @@ class ClipCandidateTest {
                 true, null, null, ProcessingStatus.PENDING_APPROVAL
         );
     }
+
+    @Test
+    @DisplayName("isLongClip e clipTypeBadge devem identificar corretamente cortes curtos e longos (> 90s)")
+    void shouldIdentifyLongAndShortClips() {
+        ClipCandidate shortClip = new ClipCandidate(
+                1L, 1L, "Curto", "H", 0.0, 90.0, 90, "R", "C", List.of(),
+                OrientationMode.VERTICAL_9_16, true, null, null, ProcessingStatus.PENDING_APPROVAL
+        );
+        assertFalse(shortClip.isLongClip());
+        assertEquals("⚡ Curto", shortClip.clipTypeBadge());
+
+        ClipCandidate longClip = new ClipCandidate(
+                2L, 1L, "Longo", "H", 0.0, 90.1, 90, "R", "C", List.of(),
+                OrientationMode.VERTICAL_9_16, true, null, null, ProcessingStatus.PENDING_APPROVAL
+        );
+        assertTrue(longClip.isLongClip());
+        assertEquals("🎬 Longo", longClip.clipTypeBadge());
+
+        ClipCandidate deepDive = new ClipCandidate(
+                3L, 1L, "Deep Dive", "H", 120.0, 720.0, 95, "R", "C", List.of(),
+                OrientationMode.VERTICAL_9_16, true, null, null, ProcessingStatus.PENDING_APPROVAL
+        );
+        assertTrue(deepDive.isLongClip());
+        assertEquals("🎬 Longo", deepDive.clipTypeBadge());
+    }
+
+    @Test
+    @DisplayName("formattedDuration deve formatar tempos inferiores a 1 minuto, em minutos e em horas")
+    void shouldFormatDurationCorrectly() {
+        ClipCandidate secondsOnly = new ClipCandidate(
+                1L, 1L, "T", "H", 0.0, 45.0, 90, "R", "C", List.of(),
+                OrientationMode.VERTICAL_9_16, true, null, null, ProcessingStatus.PENDING_APPROVAL
+        );
+        assertEquals("45s", secondsOnly.formattedDuration());
+
+        ClipCandidate minutesClip = new ClipCandidate(
+                2L, 1L, "T", "H", 0.0, 135.0, 90, "R", "C", List.of(),
+                OrientationMode.VERTICAL_9_16, true, null, null, ProcessingStatus.PENDING_APPROVAL
+        );
+        assertEquals("02m 15s", minutesClip.formattedDuration());
+
+        ClipCandidate hoursClip = new ClipCandidate(
+                3L, 1L, "T", "H", 0.0, 3912.0, 90, "R", "C", List.of(),
+                OrientationMode.VERTICAL_9_16, true, null, null, ProcessingStatus.PENDING_APPROVAL
+        );
+        assertEquals("01h 05m 12s", hoursClip.formattedDuration());
+    }
+
+    @Test
+    @DisplayName("formattedTimeRange e formattedDisplayInterval devem exibir intervalos no formato MM:SS e HH:MM:SS com duração")
+    void shouldFormatTimeRangeAndDisplayInterval() {
+        // 02:30 a 12:45 -> 150s a 765s (duração: 615s = 10m 15s)
+        ClipCandidate clip = new ClipCandidate(
+                1L, 1L, "T", "H", 150.0, 765.0, 90, "R", "C", List.of(),
+                OrientationMode.VERTICAL_9_16, true, null, null, ProcessingStatus.PENDING_APPROVAL
+        );
+        assertEquals("02:30 - 12:45", clip.formattedTimeRange());
+        assertEquals("02:30 - 12:45 (10m 15s)", clip.formattedDisplayInterval());
+
+        // Com mais de 1 hora: 01:02:30 (3750s) a 01:12:45 (4365s) -> duração: 615s (10m 15s)
+        ClipCandidate hourClip = new ClipCandidate(
+                2L, 1L, "T", "H", 3750.0, 4365.0, 90, "R", "C", List.of(),
+                OrientationMode.VERTICAL_9_16, true, null, null, ProcessingStatus.PENDING_APPROVAL
+        );
+        assertEquals("01:02:30 - 01:12:45", hourClip.formattedTimeRange());
+        assertEquals("01:02:30 - 01:12:45 (10m 15s)", hourClip.formattedDisplayInterval());
+    }
+
+    @Test
+    @DisplayName("withThumbnail deve atualizar atributos de capa e hasThumbnail deve retornar true")
+    void shouldSupportThumbnailPropertiesAndWithThumbnail() {
+        ClipCandidate original = new ClipCandidate(
+                1L, 1L, "Título", "Gancho", 10.0, 300.0, 95, "Reasoning", "Caption",
+                List.of(), OrientationMode.HORIZONTAL_16_9, false, null, null,
+                ProcessingStatus.PENDING_APPROVAL
+        );
+
+        assertNull(original.thumbnailTimestamp());
+        assertNull(original.thumbnailHeadline());
+        assertNull(original.thumbnailPath());
+        assertNull(original.rawFramePath());
+        assertFalse(original.hasThumbnail());
+
+        ClipCandidate withThumb = original.withThumbnail(
+                45.5,
+                "O SEGREDO REVELADO",
+                "/tmp/thumb.jpg",
+                "/tmp/raw_frame.jpg"
+        );
+
+        assertEquals(45.5, withThumb.thumbnailTimestamp());
+        assertEquals("O SEGREDO REVELADO", withThumb.thumbnailHeadline());
+        assertEquals("/tmp/thumb.jpg", withThumb.thumbnailPath());
+        assertEquals("/tmp/raw_frame.jpg", withThumb.rawFramePath());
+        assertTrue(withThumb.hasThumbnail());
+
+        // withBounds deve preservar thumbnail
+        ClipCandidate bounded = withThumb.withBounds(12.0, 290.0);
+        assertEquals(45.5, bounded.thumbnailTimestamp());
+        assertEquals("O SEGREDO REVELADO", bounded.thumbnailHeadline());
+        assertEquals("/tmp/thumb.jpg", bounded.thumbnailPath());
+        assertEquals("/tmp/raw_frame.jpg", bounded.rawFramePath());
+        assertTrue(bounded.hasThumbnail());
+    }
 }

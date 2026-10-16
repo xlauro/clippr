@@ -129,6 +129,9 @@ class PostgresTestcontainersIntegrationTest {
 
         // Teste de Ajuste Fino dos Marcadores de Tempo
         db.updateClipTimeBounds(c1.id(), 11.5, 56.2);
+
+        // Teste de Atualização de Thumbnail
+        db.updateClipThumbnail(c1.id(), 25.5, "O SEGREDO REVELADO", "/exports/thumb_01.jpg", "/exports/raw_01.jpg");
     }
 
     @Test

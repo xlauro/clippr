@@ -16,6 +16,8 @@ import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
+import javafx.collections.transformation.FilteredList;
+import javafx.collections.transformation.SortedList;
 import javafx.fxml.FXML;
 import javafx.scene.control.*;
 import javafx.scene.input.Clipboard;
@@ -65,7 +67,9 @@ public class MainController {
     @FXML private ComboBox<OrientationMode> comboOrientation;
     @FXML private Button btnStartPipeline;
 
+    @FXML private ComboBox<String> comboClipFilter;
     @FXML private TableView<ClipCandidate> clipTableView;
+    @FXML private TableColumn<ClipCandidate, String> colClipType;
     @FXML private TableColumn<ClipCandidate, String> colClipScore;
     @FXML private TableColumn<ClipCandidate, String> colClipTitle;
     @FXML private TableColumn<ClipCandidate, String> colClipHook;
@@ -95,6 +99,7 @@ public class MainController {
 
     private final ObservableList<VideoSource> videoList = FXCollections.observableArrayList();
     private final ObservableList<ClipCandidate> clipList = FXCollections.observableArrayList();
+    private FilteredList<ClipCandidate> filteredClipList;
     private final DatabaseManager db = DatabaseManager.getInstance();
     private final EventBus eventBus = EventBus.getInstance();
     private final ClipprPipelineService pipelineService = ClipprPipelineService.getInstance();
@@ -111,6 +116,7 @@ public class MainController {
         setupTableColumns();
         setupTableContextMenu();
         setupOrientationComboBox();
+        setupClipFilter();
         setupPlayerSelectionListener();
         loadSettings();
         registerEventBusListeners();
@@ -131,13 +137,18 @@ public class MainController {
         ));
         colVideoStatus.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().status().getDescription()));
 
-        clipTableView.setItems(clipList);
+        filteredClipList = new FilteredList<>(clipList, _ -> true);
+        SortedList<ClipCandidate> sortedClipList = new SortedList<>(filteredClipList);
+        sortedClipList.comparatorProperty().bind(clipTableView.comparatorProperty());
+        clipTableView.setItems(sortedClipList);
+
+        if (colClipType != null) {
+            colClipType.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().clipTypeBadge()));
+        }
         colClipScore.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().viralityScore() + " ⭐"));
         colClipTitle.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().title()));
         colClipHook.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().hook()));
-        colClipTime.setCellValueFactory(data -> new SimpleStringProperty(
-                String.format("%.1fs - %.1fs (%.1fs)", data.getValue().startSeconds(), data.getValue().endSeconds(), data.getValue().durationSeconds())
-        ));
+        colClipTime.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().formattedDisplayInterval()));
         colClipOrientation.setCellValueFactory(data -> new SimpleStringProperty(
                 data.getValue().orientation() != null ? data.getValue().orientation().getLabel() : "Auto"
         ));
@@ -259,6 +270,53 @@ public class MainController {
     private void setupOrientationComboBox() {
         comboOrientation.setItems(FXCollections.observableArrayList(OrientationMode.values()));
         comboOrientation.setValue(OrientationMode.AUTO);
+    }
+
+    private void setupClipFilter() {
+        if (comboClipFilter != null) {
+            comboClipFilter.setItems(FXCollections.observableArrayList(
+                    "Todos os Cortes",
+                    "⚡ Apenas Curtos",
+                    "🎬 Apenas Longos"
+            ));
+            comboClipFilter.setValue("Todos os Cortes");
+            comboClipFilter.valueProperty().addListener((_, _, _) -> applyClipFilter());
+        }
+    }
+
+    @FXML
+    private void onFilterClipsChanged() {
+        applyClipFilter();
+    }
+
+    void applyClipFilter() {
+        if (filteredClipList == null) return;
+        String filter = comboClipFilter != null ? comboClipFilter.getValue() : "Todos os Cortes";
+        if (filter == null || filter.contains("Todos")) {
+            filteredClipList.setPredicate(c -> true);
+        } else if (filter.contains("Curtos")) {
+            filteredClipList.setPredicate(c -> !c.isLongClip());
+        } else if (filter.contains("Longos")) {
+            filteredClipList.setPredicate(ClipCandidate::isLongClip);
+        } else {
+            filteredClipList.setPredicate(c -> true);
+        }
+    }
+
+    FilteredList<ClipCandidate> getFilteredClipList() {
+        return filteredClipList;
+    }
+
+    ObservableList<ClipCandidate> getClipList() {
+        return clipList;
+    }
+
+    ComboBox<String> getComboClipFilter() {
+        return comboClipFilter;
+    }
+
+    TableView<ClipCandidate> getClipTableView() {
+        return clipTableView;
     }
 
     private void setupPlayerSelectionListener() {
@@ -662,6 +720,7 @@ public class MainController {
             if (!event.approvedClips().isEmpty()) {
                 tabPane.getSelectionModel().select(1); // Muda para a aba de cortes
             }
+            applyClipFilter();
             updatePipelineButtonsState();
         }));
 

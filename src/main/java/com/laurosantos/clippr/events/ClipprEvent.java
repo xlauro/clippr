@@ -3,6 +3,7 @@ package com.laurosantos.clippr.events;
 import com.laurosantos.clippr.domain.ClipCandidate;
 import com.laurosantos.clippr.domain.VideoSource;
 
+import java.nio.file.Path;
 import java.time.Instant;
 
 public sealed interface ClipprEvent {
@@ -39,6 +40,12 @@ public sealed interface ClipprEvent {
     record ClipRenderCompleted(Instant timestamp, ClipCandidate clip) implements ClipprEvent {
         public ClipRenderCompleted(ClipCandidate clip) {
             this(Instant.now(), clip);
+        }
+    }
+
+    record ThumbnailGenerated(Instant timestamp, ClipCandidate clip, Path thumbnailPath, Path rawFramePath) implements ClipprEvent {
+        public ThumbnailGenerated(ClipCandidate clip, Path thumbnailPath, Path rawFramePath) {
+            this(Instant.now(), clip, thumbnailPath, rawFramePath);
         }
     }
 

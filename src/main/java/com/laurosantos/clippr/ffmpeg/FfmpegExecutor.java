@@ -86,15 +86,15 @@ public class FfmpegExecutor {
                 false
         ));
 
+        OrientationMode orientation = clip.orientation() != null ? clip.orientation() : OrientationMode.VERTICAL_9_16;
+
         // Subtítulos .ass opcionais
         Path assFile = null;
         if (clip.hasSubtitles() && segments != null && !segments.isEmpty()) {
             Path tempSubDir = Files.createDirectories(Path.of("temp", "subtitles"));
             assFile = tempSubDir.resolve("sub_%d.ass".formatted(System.currentTimeMillis()));
-            SubtitleGenerator.generateAssSubtitles(segments, clip.startSeconds(), clip.endSeconds(), assFile);
+            SubtitleGenerator.generateAssSubtitles(segments, clip.startSeconds(), clip.endSeconds(), orientation, assFile);
         }
-
-        OrientationMode orientation = clip.orientation() != null ? clip.orientation() : OrientationMode.VERTICAL_9_16;
 
         List<String> command = buildFfmpegCommand(
                 sourceVideoFile,
@@ -152,7 +152,11 @@ public class FfmpegExecutor {
                 clip.hasSubtitles(),
                 outputFile.toAbsolutePath().toString(),
                 jsonMetadataFile.toAbsolutePath().toString(),
-                ProcessingStatus.COMPLETED
+                ProcessingStatus.COMPLETED,
+                clip.thumbnailTimestamp(),
+                clip.thumbnailHeadline(),
+                clip.thumbnailPath(),
+                clip.rawFramePath()
         );
 
         EventBus.getInstance().publish(new ClipprEvent.LogMessage("Corte renderizado com sucesso: " + outputFile.getFileName(), false));
@@ -239,6 +243,18 @@ public class FfmpegExecutor {
             root.put("author", source.author());
             root.put("exportedAt", Instant.now().toString());
             root.put("videoFilePath", videoFile.toAbsolutePath().toString());
+            if (clip.thumbnailTimestamp() != null) {
+                root.put("thumbnailTimestamp", clip.thumbnailTimestamp());
+            }
+            if (clip.thumbnailHeadline() != null) {
+                root.put("thumbnailHeadline", clip.thumbnailHeadline());
+            }
+            if (clip.thumbnailPath() != null) {
+                root.put("thumbnailPath", clip.thumbnailPath());
+            }
+            if (clip.rawFramePath() != null) {
+                root.put("rawFramePath", clip.rawFramePath());
+            }
 
             ArrayNode tagsNode = root.putArray("hashtags");
             if (clip.hashtags() != null) {

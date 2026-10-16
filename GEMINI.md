@@ -4,6 +4,7 @@
 - **Aderência Total ao Escopo Solicitado**: Execute exatamente o que o usuário pediu. Não invente requisitos, não adicione bibliotecas não solicitadas e não faça refatorações cosméticas em código que não faz parte da demanda.
 - **Eficiência e Velocidade**: Não leia arquivos desnecessários (vídeos, logs gigantescos, caches do build). Use comandos cirúrgicos (`find`, `grep`, `head`, `tail`) em vez de varreduras amplas.
 - **Sem Perda de Tempo com Explicações Óbvias**: Responda com clareza, objetividade e foco nas decisões técnicas e no código executado.
+- **Uso Obrigatório de Subagents**: SEMPRE decomponha e execute as tarefas do projeto utilizando subagents autônomos (`invoke_subagent`), garantindo execução modular, paralelismo e isolamento de contexto.
 
 ## 2. Padrões Técnicos (Java 25)
 - **Modern Java Idioms**: Utilize recursos modernos do Java 25:

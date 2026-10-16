@@ -8,7 +8,7 @@ module com.laurosantos.clippr {
     requires java.sql;
     requires java.naming;
     requires transitive java.net.http;
-    requires java.desktop;
+    requires transitive java.desktop;
 
     requires org.slf4j;
     requires org.jboss.logging;

@@ -7,6 +7,7 @@ import com.laurosantos.clippr.downloader.YtDlpManager;
 import com.laurosantos.clippr.events.ClipprEvent;
 import com.laurosantos.clippr.events.EventBus;
 import com.laurosantos.clippr.ffmpeg.FfmpegExecutor;
+import com.laurosantos.clippr.ffmpeg.ThumbnailGenerator;
 import com.laurosantos.clippr.persistence.DatabaseManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,6 +27,7 @@ public class ClipprPipelineService {
     private final EventBus eventBus = EventBus.getInstance();
     private final YtDlpManager ytDlpManager = new YtDlpManager();
     private final FfmpegExecutor ffmpegExecutor = new FfmpegExecutor();
+    private final ThumbnailGenerator thumbnailGenerator = new ThumbnailGenerator();
 
     private final Map<Long, List<TranscriptSegment>> cachedSegments = new ConcurrentHashMap<>();
     private final Map<Long, Path> cachedVideoFiles = new ConcurrentHashMap<>();
@@ -173,7 +175,8 @@ public class ClipprPipelineService {
                             c.id(), source.id(), c.title(), c.hook(), c.startSeconds(), c.endSeconds(),
                             c.viralityScore(), c.reasoning(), c.suggestedCaption(), c.hashtags(),
                             resolvedOrientation, settings.burnSubtitles(), c.outputFilePath(), c.metadataJsonPath(),
-                            ProcessingStatus.PENDING_APPROVAL
+                            ProcessingStatus.PENDING_APPROVAL,
+                            c.thumbnailTimestamp(), c.thumbnailHeadline(), c.thumbnailPath(), c.rawFramePath()
                     ));
                 }
 
@@ -240,6 +243,51 @@ public class ClipprPipelineService {
                             true // Fundo desfocado para 9:16
                     );
                     db.updateClipOutput(clip.id(), rendered.outputFilePath(), rendered.metadataJsonPath(), ProcessingStatus.COMPLETED);
+
+                    // Geração automática de thumbnail para cortes longos, horizontais ou com thumbnail configurada
+                    boolean isHorizontal = clip.orientation() == OrientationMode.HORIZONTAL_16_9;
+                    boolean hasCustomThumb = clip.thumbnailHeadline() != null || clip.thumbnailTimestamp() != null || clip.thumbnailPath() != null;
+                    if (clip.isLongClip() || isHorizontal || hasCustomThumb) {
+                        try {
+                            String headline = clip.thumbnailHeadline() != null && !clip.thumbnailHeadline().isBlank()
+                                    ? clip.thumbnailHeadline()
+                                    : (clip.hook() != null && !clip.hook().isBlank() ? clip.hook() : clip.title());
+                            double thumbTimestamp = clip.thumbnailTimestamp() != null
+                                    ? clip.thumbnailTimestamp()
+                                    : clip.startSeconds() + Math.min(2.0, clip.durationSeconds() / 2.0);
+                            String baseFileName = "thumb_clip_" + (clip.id() != null ? clip.id() : System.currentTimeMillis());
+
+                            ThumbnailGenerator.ThumbnailResult thumbResult = thumbnailGenerator.generateThumbnail(
+                                    videoFile,
+                                    thumbTimestamp,
+                                    headline,
+                                    outputDir,
+                                    baseFileName
+                            );
+
+                            ClipCandidate withThumb = rendered.withThumbnail(
+                                    thumbTimestamp,
+                                    headline,
+                                    thumbResult.finalThumbnailPath().toAbsolutePath().toString(),
+                                    thumbResult.rawFramePath().toAbsolutePath().toString()
+                            );
+
+                            if (clip.id() != null) {
+                                db.updateClipThumbnail(
+                                        clip.id(),
+                                        thumbTimestamp,
+                                        headline,
+                                        withThumb.thumbnailPath(),
+                                        withThumb.rawFramePath()
+                                );
+                            }
+                            eventBus.publish(new ClipprEvent.ThumbnailGenerated(withThumb, thumbResult.finalThumbnailPath(), thumbResult.rawFramePath()));
+                            eventBus.publish(new ClipprEvent.LogMessage("Thumbnail gerada para o corte: " + clip.title(), false));
+                        } catch (Exception exThumb) {
+                            logger.warn("Falha ao gerar thumbnail para o corte {}: {}", clip.title(), exThumb.getMessage());
+                            eventBus.publish(new ClipprEvent.LogMessage("Aviso: Falha ao gerar thumbnail para " + clip.title() + ": " + exThumb.getMessage(), true));
+                        }
+                    }
                 }
 
                 db.updateVideoStatus(source.id(), ProcessingStatus.COMPLETED, null);
@@ -255,5 +303,43 @@ public class ClipprPipelineService {
                 eventBus.publish(new ClipprEvent.ProgressUpdated(0.0, "Erro na renderização: " + e.getMessage()));
             }
         });
+    }
+
+    public ThumbnailGenerator getThumbnailGenerator() {
+        return thumbnailGenerator;
+    }
+
+    public ClipCandidate generateThumbnailForClipOnDemand(VideoSource source, ClipCandidate clip, double timestamp, String headline, Path outputDir) {
+        Thread.ofVirtual().start(() -> {
+            try {
+                Path videoFile = getOrCreateVideoFile(source);
+                String baseFileName = "thumb_clip_" + (clip.id() != null ? clip.id() : System.currentTimeMillis());
+                ThumbnailGenerator.ThumbnailResult thumbResult = thumbnailGenerator.generateThumbnail(
+                        videoFile,
+                        timestamp,
+                        headline,
+                        outputDir,
+                        baseFileName
+                );
+
+                ClipCandidate updated = clip.withThumbnail(
+                        timestamp,
+                        headline,
+                        thumbResult.finalThumbnailPath().toAbsolutePath().toString(),
+                        thumbResult.rawFramePath().toAbsolutePath().toString()
+                );
+
+                if (clip.id() != null) {
+                    db.updateClipThumbnail(clip.id(), timestamp, headline, updated.thumbnailPath(), updated.rawFramePath());
+                }
+
+                eventBus.publish(new ClipprEvent.ThumbnailGenerated(updated, thumbResult.finalThumbnailPath(), thumbResult.rawFramePath()));
+                eventBus.publish(new ClipprEvent.LogMessage("Thumbnail gerada sob demanda para o corte: " + clip.title(), false));
+            } catch (Exception e) {
+                logger.error("Erro ao gerar thumbnail sob demanda para clipe {}: {}", clip.title(), e.getMessage(), e);
+                eventBus.publish(new ClipprEvent.PipelineError("THUMBNAIL", "Erro ao gerar thumbnail: " + e.getMessage(), e));
+            }
+        });
+        return clip;
     }
 }

@@ -66,6 +66,18 @@ public class ClipEntity {
     @Column(nullable = false, length = 50)
     private ProcessingStatus status;
 
+    @Column(name = "thumbnail_timestamp")
+    private Double thumbnailTimestamp;
+
+    @Column(name = "thumbnail_headline", length = 500)
+    private String thumbnailHeadline;
+
+    @Column(name = "thumbnail_path", length = 1000)
+    private String thumbnailPath;
+
+    @Column(name = "raw_frame_path", length = 1000)
+    private String rawFramePath;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -87,6 +99,10 @@ public class ClipEntity {
         entity.outputFilePath = domain.outputFilePath();
         entity.metadataJsonPath = domain.metadataJsonPath();
         entity.status = domain.status();
+        entity.thumbnailTimestamp = domain.thumbnailTimestamp();
+        entity.thumbnailHeadline = domain.thumbnailHeadline();
+        entity.thumbnailPath = domain.thumbnailPath();
+        entity.rawFramePath = domain.rawFramePath();
         try {
             entity.hashtagsJson = MAPPER.writeValueAsString(domain.hashtags() != null ? domain.hashtags() : List.of());
         } catch (Exception e) {
@@ -118,7 +134,11 @@ public class ClipEntity {
                 hasSubtitles,
                 outputFilePath,
                 metadataJsonPath,
-                status
+                status,
+                thumbnailTimestamp,
+                thumbnailHeadline,
+                thumbnailPath,
+                rawFramePath
         );
     }
 
@@ -169,4 +189,16 @@ public class ClipEntity {
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+
+    public Double getThumbnailTimestamp() { return thumbnailTimestamp; }
+    public void setThumbnailTimestamp(Double thumbnailTimestamp) { this.thumbnailTimestamp = thumbnailTimestamp; }
+
+    public String getThumbnailHeadline() { return thumbnailHeadline; }
+    public void setThumbnailHeadline(String thumbnailHeadline) { this.thumbnailHeadline = thumbnailHeadline; }
+
+    public String getThumbnailPath() { return thumbnailPath; }
+    public void setThumbnailPath(String thumbnailPath) { this.thumbnailPath = thumbnailPath; }
+
+    public String getRawFramePath() { return rawFramePath; }
+    public void setRawFramePath(String rawFramePath) { this.rawFramePath = rawFramePath; }
 }

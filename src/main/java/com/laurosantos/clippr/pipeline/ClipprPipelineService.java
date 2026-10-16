@@ -68,34 +68,63 @@ public class ClipprPipelineService {
                 db.updateVideoStatus(source.id(), ProcessingStatus.FETCHING_TRANSCRIPT, null);
                 eventBus.publish(new ClipprEvent.VideoSourceUpdated(source.withStatus(ProcessingStatus.FETCHING_TRANSCRIPT, null)));
 
-                // 1. Extração de Metadados e Transcrição em 2 segundos
-                var transcriptResult = ytDlpManager.fetchMetadataAndTranscript(source.url());
-                VideoSource updatedSource = new VideoSource(
-                        source.id(),
-                        source.url(),
-                        transcriptResult.metadata().id(),
-                        transcriptResult.metadata().title(),
-                        transcriptResult.metadata().author(),
-                        transcriptResult.metadata().durationSeconds(),
-                        transcriptResult.vttFile() != null ? transcriptResult.vttFile().toString() : null,
-                        null,
-                        ProcessingStatus.ANALYZING_AI,
-                        null,
-                        source.createdAt()
-                );
-                db.saveVideo(updatedSource);
-                eventBus.publish(new ClipprEvent.VideoSourceUpdated(updatedSource));
-
-                if (transcriptResult.segments().isEmpty()) {
-                    String msg = "Nenhuma transcrição encontrada para o vídeo.";
-                    db.updateVideoStatus(source.id(), ProcessingStatus.FAILED, msg);
-                    eventBus.publish(new ClipprEvent.VideoSourceUpdated(updatedSource.withStatus(ProcessingStatus.FAILED, msg)));
-                    eventBus.publish(new ClipprEvent.LogMessage("Falha: " + msg, false));
-                    eventBus.publish(new ClipprEvent.ProgressUpdated(0.0, "Falha: Sem transcrição"));
-                    return;
+                // 1. Extração ou Recuperação de Metadados e Transcrição
+                List<TranscriptSegment> segments = cachedSegments.get(source.id());
+                if ((segments == null || segments.isEmpty()) && source.transcriptPath() != null) {
+                    Path vtt = Path.of(source.transcriptPath());
+                    if (Files.exists(vtt)) {
+                        try {
+                            segments = com.laurosantos.clippr.downloader.TranscriptParser.parseVtt(Files.readString(vtt));
+                            if (!segments.isEmpty()) {
+                                cachedSegments.put(source.id(), segments);
+                            }
+                        } catch (Exception e) {
+                            logger.warn("Falha ao recuperar legenda do disco: {}", e.getMessage());
+                        }
+                    }
                 }
 
-                cachedSegments.put(source.id(), transcriptResult.segments());
+                VideoSource updatedSource = source;
+                if (segments == null || segments.isEmpty()) {
+                    eventBus.publish(new ClipprEvent.LogMessage("Iniciando processamento de: " + source.url(), false));
+                    eventBus.publish(new ClipprEvent.ProgressUpdated(0.1, "Obtendo transcrição e metadados..."));
+                    db.updateVideoStatus(source.id(), ProcessingStatus.FETCHING_TRANSCRIPT, null);
+                    eventBus.publish(new ClipprEvent.VideoSourceUpdated(source.withStatus(ProcessingStatus.FETCHING_TRANSCRIPT, null)));
+
+                    var transcriptResult = ytDlpManager.fetchMetadataAndTranscript(source.url());
+                    updatedSource = new VideoSource(
+                            source.id(),
+                            source.url(),
+                            transcriptResult.metadata().id(),
+                            transcriptResult.metadata().title(),
+                            transcriptResult.metadata().author(),
+                            transcriptResult.metadata().durationSeconds(),
+                            transcriptResult.vttFile() != null ? transcriptResult.vttFile().toString() : null,
+                            null,
+                            ProcessingStatus.ANALYZING_AI,
+                            null,
+                            source.createdAt()
+                    );
+                    db.saveVideo(updatedSource);
+                    eventBus.publish(new ClipprEvent.VideoSourceUpdated(updatedSource));
+
+                    if (transcriptResult.segments().isEmpty()) {
+                        String msg = "Nenhuma transcrição encontrada para o vídeo.";
+                        db.updateVideoStatus(source.id(), ProcessingStatus.FAILED, msg);
+                        eventBus.publish(new ClipprEvent.VideoSourceUpdated(updatedSource.withStatus(ProcessingStatus.FAILED, msg)));
+                        eventBus.publish(new ClipprEvent.LogMessage("Falha: " + msg, false));
+                        eventBus.publish(new ClipprEvent.ProgressUpdated(0.0, "Falha: Sem transcrição"));
+                        return;
+                    }
+
+                    segments = transcriptResult.segments();
+                    cachedSegments.put(source.id(), segments);
+                } else {
+                    eventBus.publish(new ClipprEvent.LogMessage("Reaproveitando transcrição existente (" + segments.size() + " trechos) para: " + (source.title() != null ? source.title() : source.url()), false));
+                    db.updateVideoStatus(source.id(), ProcessingStatus.ANALYZING_AI, null);
+                    updatedSource = source.withStatus(ProcessingStatus.ANALYZING_AI, null);
+                    eventBus.publish(new ClipprEvent.VideoSourceUpdated(updatedSource));
+                }
 
                 // 2. Avaliação de Viralização via Gemini 3.8 Flash
                 String apiKey = settings.geminiApiKey();
@@ -118,7 +147,7 @@ public class ClipprPipelineService {
                         source.id(),
                         updatedSource.title(),
                         updatedSource.author(),
-                        transcriptResult.segments(),
+                        segments,
                         settings.minViralityScore()
                 );
 

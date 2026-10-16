@@ -6,7 +6,12 @@ import com.laurosantos.clippr.downloader.TranscriptSegment;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import com.sun.net.httpserver.HttpServer;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -15,7 +20,7 @@ class GeminiClientTest {
     @Test
     @DisplayName("Deve fazer parse do JSON retornado pela API Gemini e extrair candidatos estruturados")
     void shouldParseGeminiResponseCorrectly() throws Exception {
-        GeminiClient client = new GeminiClient("fake-key", "gemini-2.5-flash");
+        GeminiClient client = new GeminiClient("fake-key", "gemini-3.8-flash");
 
         String simulatedApiResponse = """
                 {
@@ -50,7 +55,7 @@ class GeminiClientTest {
     @Test
     @DisplayName("Deve ajustar bordas de tempo (snap) com base nos segmentos reais da transcrição")
     void shouldSnapTimestampsToActualSegments() {
-        GeminiClient client = new GeminiClient("fake-key", "gemini-2.5-flash");
+        GeminiClient client = new GeminiClient("fake-key", "gemini-3.8-flash");
 
         List<TranscriptSegment> segments = List.of(
                 new TranscriptSegment(10.0, 15.0, "Eu perdi tudo"),
@@ -70,5 +75,112 @@ class GeminiClientTest {
         assertEquals(1, snapped.size());
         assertEquals(10.0, snapped.getFirst().startSeconds(), 0.001, "O início deve fazer snap para 10.0s");
         assertEquals(46.0, snapped.getFirst().endSeconds(), 0.001, "O término deve fazer snap para 46.0s");
+    }
+
+    @Test
+    @DisplayName("Deve re-tentar automaticamente quando receber HTTP 503 e obter sucesso na tentativa seguinte")
+    void shouldRetryAndRecoverOnHttp503() throws Exception {
+        AtomicInteger callCount = new AtomicInteger(0);
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            int count = callCount.incrementAndGet();
+            if (count == 1) {
+                String error503 = """
+                        {
+                          "error": {
+                            "code": 503,
+                            "message": "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.",
+                            "status": "UNAVAILABLE"
+                          }
+                        }
+                        """;
+                exchange.sendResponseHeaders(503, error503.getBytes(StandardCharsets.UTF_8).length);
+                try (OutputStream os = exchange.getResponseBody()) {
+                    os.write(error503.getBytes(StandardCharsets.UTF_8));
+                }
+            } else {
+                String success200 = """
+                        {
+                          "candidates": [
+                            {
+                              "content": {
+                                "parts": [
+                                  {
+                                    "text": "[{\\"title\\":\\"Vídeo Viral Teste\\",\\"hook\\":\\"Gancho\\",\\"startSeconds\\":10.0,\\"endSeconds\\":30.0,\\"viralityScore\\":95,\\"reasoning\\":\\"Bom\\",\\"suggestedCaption\\":\\"Cap\\",\\"hashtags\\":[]}]"
+                                  }
+                                ]
+                              }
+                            }
+                          ]
+                        }
+                        """;
+                exchange.sendResponseHeaders(200, success200.getBytes(StandardCharsets.UTF_8).length);
+                try (OutputStream os = exchange.getResponseBody()) {
+                    os.write(success200.getBytes(StandardCharsets.UTF_8));
+                }
+            }
+        });
+        server.start();
+
+        try {
+            String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
+            GeminiClient client = new GeminiClient("test-key", "gemini-3.8-flash", null, 3, 10L, baseUrl);
+            var result = client.analyzeTranscript(
+                    1L,
+                    "Teste",
+                    "Autor",
+                    List.of(new TranscriptSegment(10.0, 30.0, "Texto")),
+                    90
+            );
+
+            assertEquals(2, callCount.get(), "Deve ter feito exatamente 2 chamadas (1 falha 503 + 1 sucesso)");
+            assertEquals(1, result.approvedClips().size());
+            assertEquals("Vídeo Viral Teste", result.approvedClips().getFirst().title());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    @DisplayName("Deve esgotar retries e lançar RuntimeException após persistência do erro HTTP 503")
+    void shouldThrowExceptionWhenHttp503Persists() throws Exception {
+        AtomicInteger callCount = new AtomicInteger(0);
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            callCount.incrementAndGet();
+            String error503 = """
+                    {
+                      "error": {
+                        "code": 503,
+                        "message": "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.",
+                        "status": "UNAVAILABLE"
+                      }
+                    }
+                    """;
+            exchange.sendResponseHeaders(503, error503.getBytes(StandardCharsets.UTF_8).length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(error503.getBytes(StandardCharsets.UTF_8));
+            }
+        });
+        server.start();
+
+        try {
+            String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
+            GeminiClient client = new GeminiClient("test-key", "gemini-3.8-flash", null, 3, 10L, baseUrl);
+            RuntimeException ex = assertThrows(RuntimeException.class, () ->
+                    client.analyzeTranscript(
+                            1L,
+                            "Teste",
+                            "Autor",
+                            List.of(new TranscriptSegment(10.0, 30.0, "Texto")),
+                            90
+                    )
+            );
+
+            assertEquals(3, callCount.get(), "Deve ter realizado as 3 tentativas antes de falhar");
+            assertTrue(ex.getMessage().contains("alta demanda") || ex.getMessage().contains("503"));
+        } finally {
+            server.stop(0);
+        }
     }
 }

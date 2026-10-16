@@ -143,7 +143,7 @@ class PostgresTestcontainersIntegrationTest {
                 true,
                 8,
                 "custom-testcontainers-api-key",
-                "gemini-2.5-flash"
+                "gemini-3.8-flash"
         );
 
         db.saveSettings(customSettings);
@@ -170,7 +170,7 @@ class PostgresTestcontainersIntegrationTest {
                 true,
                 4,
                 "", // Chave vazia no banco
-                "gemini-2.5-flash"
+                "gemini-3.8-flash"
         );
 
         db.saveSettings(emptyKeySettings);

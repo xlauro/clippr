@@ -22,7 +22,7 @@ class AppSettingsTest {
         assertEquals(60.0, settings.autoVerticalMaxDurationSeconds());
         assertTrue(settings.burnSubtitles());
         assertEquals(0, settings.cpuThreads());
-        assertEquals("gemini-2.5-flash", settings.geminiModel());
+        assertEquals("gemini-3.8-flash", settings.geminiModel());
 
         // A chave deve ter sido resolvida do ambiente (.zshrc)
         assertNotNull(settings.geminiApiKey());
@@ -41,7 +41,7 @@ class AppSettingsTest {
                 false,
                 4,
                 "custom_key_123",
-                "gemini-2.5-pro"
+                "gemini-3.8-pro"
         );
 
         assertEquals("/custom/folder", custom.outputDirectory());
@@ -52,6 +52,6 @@ class AppSettingsTest {
         assertFalse(custom.burnSubtitles());
         assertEquals(4, custom.cpuThreads());
         assertEquals("custom_key_123", custom.geminiApiKey());
-        assertEquals("gemini-2.5-pro", custom.geminiModel());
+        assertEquals("gemini-3.8-pro", custom.geminiModel());
     }
 }

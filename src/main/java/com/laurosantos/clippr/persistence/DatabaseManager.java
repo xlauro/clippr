@@ -272,23 +272,34 @@ public class DatabaseManager {
             SettingsEntity entity = em.find(SettingsEntity.class, 1L);
             if (entity != null) {
                 AppSettings domain = entity.toDomain();
-                if (domain.geminiApiKey() == null || domain.geminiApiKey().isBlank()) {
+                boolean needsUpdate = false;
+                String geminiModel = domain.geminiModel();
+                if (geminiModel == null || geminiModel.isBlank() || "gemini-2.5-flash".equals(geminiModel)) {
+                    geminiModel = "gemini-3.8-flash";
+                    needsUpdate = true;
+                }
+                String apiKey = domain.geminiApiKey();
+                if (apiKey == null || apiKey.isBlank()) {
                     String resolvedKey = com.laurosantos.clippr.ai.GeminiApiKeyResolver.resolveApiKey();
                     if (!resolvedKey.isBlank()) {
-                        AppSettings updated = new AppSettings(
-                                domain.outputDirectory(),
-                                domain.minViralityScore(),
-                                domain.autoProcessAboveThreshold(),
-                                domain.defaultOrientation(),
-                                domain.autoVerticalMaxDurationSeconds(),
-                                domain.burnSubtitles(),
-                                domain.cpuThreads(),
-                                resolvedKey,
-                                domain.geminiModel()
-                        );
-                        saveSettings(updated);
-                        return updated;
+                        apiKey = resolvedKey;
+                        needsUpdate = true;
                     }
+                }
+                if (needsUpdate) {
+                    AppSettings updated = new AppSettings(
+                            domain.outputDirectory(),
+                            domain.minViralityScore(),
+                            domain.autoProcessAboveThreshold(),
+                            domain.defaultOrientation(),
+                            domain.autoVerticalMaxDurationSeconds(),
+                            domain.burnSubtitles(),
+                            domain.cpuThreads(),
+                            apiKey != null ? apiKey : "",
+                            geminiModel
+                    );
+                    saveSettings(updated);
+                    return updated;
                 }
                 return domain;
             }

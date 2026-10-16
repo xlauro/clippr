@@ -39,7 +39,7 @@ public class SettingsEntity {
     private String geminiApiKey = "";
 
     @Column(name = "gemini_model", length = 100)
-    private String geminiModel = "gemini-2.5-flash";
+    private String geminiModel = "gemini-3.8-flash";
 
     public SettingsEntity() {}
 
@@ -72,7 +72,7 @@ public class SettingsEntity {
                 burnSubtitles,
                 cpuThreads,
                 geminiApiKey != null ? geminiApiKey : "",
-                geminiModel != null ? geminiModel : "gemini-2.5-flash"
+                geminiModel != null ? geminiModel : "gemini-3.8-flash"
         );
     }
 

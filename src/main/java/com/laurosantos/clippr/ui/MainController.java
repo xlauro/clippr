@@ -347,7 +347,18 @@ public class MainController {
     private void playMediaFile(File videoFile, double startOffsetSeconds, double endLimitSeconds) {
         try {
             Media media = new Media(videoFile.toURI().toString());
+            media.setOnError(() -> {
+                logger.error("Erro no arquivo de mídia ({}): {}", videoFile.getName(), media.getError());
+                playerPlaceholderLabel.setText("Erro na mídia: " + (media.getError() != null ? media.getError().getMessage() : "Formato não suportado"));
+                playerPlaceholderLabel.setVisible(true);
+            });
+
             mediaPlayer = new MediaPlayer(media);
+            mediaPlayer.setOnError(() -> {
+                logger.error("Erro no MediaPlayer ({}): {}", videoFile.getName(), mediaPlayer.getError());
+                playerPlaceholderLabel.setText("Erro no player: " + (mediaPlayer.getError() != null ? mediaPlayer.getError().getMessage() : "Falha na reprodução"));
+                playerPlaceholderLabel.setVisible(true);
+            });
             mediaView.setMediaPlayer(mediaPlayer);
 
             mediaPlayer.setOnReady(() -> {
@@ -1002,7 +1013,7 @@ public class MainController {
                 chkSubtitles.isSelected(),
                 0, // 100% CPU
                 geminiApiKeyField.getText(),
-                "gemini-2.5-flash"
+                "gemini-3.8-flash"
         );
     }
 

@@ -28,7 +28,7 @@ public record AppSettings(
                 true,
                 0, // 0 = 100% CPU (FFmpeg threads 0)
                 apiKey,
-                "gemini-2.5-flash" // compatível com a API padrão do Gemini
+                "gemini-3.8-flash"
         );
     }
 }

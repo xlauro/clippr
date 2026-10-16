@@ -351,6 +351,7 @@ public class YtDlpManager {
 
         ProcessBuilder pb = new ProcessBuilder(
                 binaryPath.toString(),
+                "-S", "vcodec:h264,res,acodec:m4a",
                 "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
                 "--output", destinationFile.toString(),
                 "--newline",

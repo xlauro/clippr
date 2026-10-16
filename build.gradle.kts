@@ -18,7 +18,7 @@ java {
 }
 
 javafx {
-    version = "24.0.1"
+    version = "26.0.2"
     modules = listOf("javafx.controls", "javafx.fxml", "javafx.media")
 }
 

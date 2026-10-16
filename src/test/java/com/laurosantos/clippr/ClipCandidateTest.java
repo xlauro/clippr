@@ -40,6 +40,25 @@ class ClipCandidateTest {
         assertEquals(0.0, inverted.durationSeconds(), 0.001);
     }
 
+    @Test
+    @DisplayName("withBounds deve criar nova instância de ClipCandidate com timestamps atualizados preservando os demais atributos")
+    void shouldUpdateBoundsPreservingOtherAttributes() {
+        ClipCandidate original = new ClipCandidate(
+                10L, 2L, "Título", "Gancho", 15.0, 45.0, 95, "Motivo", "Legenda",
+                List.of("tag1"), OrientationMode.VERTICAL_9_16, true, "/path.mp4", "/path.json", ProcessingStatus.PENDING_APPROVAL
+        );
+
+        ClipCandidate updated = original.withBounds(14.0, 46.5);
+
+        assertEquals(10L, updated.id());
+        assertEquals(2L, updated.videoSourceId());
+        assertEquals("Título", updated.title());
+        assertEquals(14.0, updated.startSeconds(), 0.001);
+        assertEquals(46.5, updated.endSeconds(), 0.001);
+        assertEquals(32.5, updated.durationSeconds(), 0.001);
+        assertEquals(95, updated.viralityScore());
+    }
+
     private ClipCandidate createClipWithScore(int score) {
         return new ClipCandidate(
                 1L, 1L, "Título", "Gancho", 0.0, 30.0, score,

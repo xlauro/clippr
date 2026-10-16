@@ -26,4 +26,12 @@ public record ClipCandidate(
     public boolean isViralWorthy(int minScoreThreshold) {
         return viralityScore >= minScoreThreshold;
     }
+
+    public ClipCandidate withBounds(double newStart, double newEnd) {
+        return new ClipCandidate(
+                id, videoSourceId, title, hook, newStart, newEnd, viralityScore,
+                reasoning, suggestedCaption, hashtags, orientation, hasSubtitles,
+                outputFilePath, metadataJsonPath, status
+        );
+    }
 }

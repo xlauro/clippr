@@ -126,6 +126,9 @@ class PostgresTestcontainersIntegrationTest {
         assertNotNull(c2.id());
         assertEquals(65, c2.viralityScore());
         assertFalse(c2.isViralWorthy(90));
+
+        // Teste de Ajuste Fino dos Marcadores de Tempo
+        db.updateClipTimeBounds(c1.id(), 11.5, 56.2);
     }
 
     @Test

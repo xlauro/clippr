@@ -75,33 +75,85 @@
                 </VBox>
             </Tab>
 
-            <!-- TAB 2: CORTES DETECTADOS -->
+            <!-- TAB 2: CORTES DETECTADOS & PLAYER -->
             <Tab text="🎬 Cortes &amp; Momentos Virais">
-                <VBox spacing="12.0">
-                    <padding>
-                        <Insets top="12.0" right="8.0" bottom="8.0" left="8.0" />
-                    </padding>
+                <SplitPane dividerPositions="0.55" VBox.vgrow="ALWAYS">
+                    <!-- Painel Esquerdo: Tabela de Cortes -->
+                    <VBox spacing="10.0">
+                        <padding>
+                            <Insets top="10.0" right="10.0" bottom="10.0" left="10.0" />
+                        </padding>
 
-                    <HBox spacing="12.0" alignment="CENTER_LEFT">
-                        <Label text="Momentos com alto potencial de viralização identificados pela IA:" style="-fx-font-weight: bold;" />
-                        <Region HBox.hgrow="ALWAYS" />
-                        <Button text="⚡ Renderizar Todos Aprovados (100% CPU)" onAction="#onRenderAllApproved" styleClass="accent" />
-                    </HBox>
+                        <HBox spacing="10.0" alignment="CENTER_LEFT">
+                            <Label text="Momentos Virais Detectados:" style="-fx-font-weight: bold;" />
+                            <Region HBox.hgrow="ALWAYS" />
+                            <Button text="▶ Renderizar Selecionado" onAction="#onRenderSelectedClip" styleClass="accent" />
+                            <Button text="⚡ Renderizar Todos (100% CPU)" onAction="#onRenderAllApproved" styleClass="success" />
+                        </HBox>
 
-                    <TableView fx:id="clipTableView" VBox.vgrow="ALWAYS">
-                        <columns>
-                            <TableColumn fx:id="colClipScore" text="Score" prefWidth="80.0" />
-                            <TableColumn fx:id="colClipTitle" text="Título do Corte" prefWidth="300.0" />
-                            <TableColumn fx:id="colClipHook" text="Gancho (Primeiros 3s)" prefWidth="260.0" />
-                            <TableColumn fx:id="colClipTime" text="Intervalo / Duração" prefWidth="140.0" />
-                            <TableColumn fx:id="colClipOrientation" text="Formato" prefWidth="100.0" />
-                            <TableColumn fx:id="colClipStatus" text="Status" prefWidth="140.0" />
-                        </columns>
-                        <placeholder>
-                            <Label text="Nenhum corte gerado ainda. Processe um vídeo na aba 'Fila de Vídeos'." />
-                        </placeholder>
-                    </TableView>
-                </VBox>
+                        <TableView fx:id="clipTableView" VBox.vgrow="ALWAYS">
+                            <columns>
+                                <TableColumn fx:id="colClipScore" text="Score" prefWidth="75.0" />
+                                <TableColumn fx:id="colClipTitle" text="Título do Corte" prefWidth="200.0" />
+                                <TableColumn fx:id="colClipHook" text="Gancho (3s)" prefWidth="180.0" />
+                                <TableColumn fx:id="colClipTime" text="Intervalo" prefWidth="110.0" />
+                                <TableColumn fx:id="colClipOrientation" text="Formato" prefWidth="80.0" />
+                                <TableColumn fx:id="colClipStatus" text="Status" prefWidth="110.0" />
+                            </columns>
+                            <placeholder>
+                                <Label text="Nenhum corte gerado ainda. Processe um vídeo na aba 'Fila de Vídeos'." />
+                            </placeholder>
+                        </TableView>
+                    </VBox>
+
+                    <!-- Painel Direito: Player de Vídeo e Ajuste Fino -->
+                    <VBox spacing="10.0">
+                        <padding>
+                            <Insets top="10.0" right="10.0" bottom="10.0" left="10.0" />
+                        </padding>
+
+                        <Label text="Pré-visualização do Corte:" style="-fx-font-weight: bold;" />
+
+                        <!-- Container do Vídeo com proporção preservada -->
+                        <StackPane fx:id="playerContainer" VBox.vgrow="ALWAYS"
+                                   style="-fx-background-color: #0d1117; -fx-background-radius: 8px;">
+                            <MediaView fx:id="mediaView" preserveRatio="true" />
+                            <Label fx:id="playerPlaceholderLabel" text="Selecione um corte na tabela para assistir"
+                                   style="-fx-text-fill: -color-fg-muted;" />
+                        </StackPane>
+
+                        <!-- Controles de Reprodução -->
+                        <VBox spacing="6.0" style="-fx-background-color: -color-bg-subtle; -fx-padding: 8px; -fx-background-radius: 6px;">
+                            <Slider fx:id="timeSlider" max="100.0" value="0.0" />
+                            <HBox spacing="10.0" alignment="CENTER_LEFT">
+                                <Button fx:id="btnPlayPause" text="▶ Play" onAction="#onTogglePlayPause" />
+                                <Label fx:id="timeLabel" text="00:00 / 00:00" style="-fx-font-family: monospace;" />
+                                <Region HBox.hgrow="ALWAYS" />
+                                <Label text="🔊" />
+                                <Slider fx:id="volumeSlider" prefWidth="80.0" max="1.0" value="0.8" />
+                            </HBox>
+                        </VBox>
+
+                        <!-- Painel de Ajuste Fino de Timestamps -->
+                        <VBox spacing="6.0" style="-fx-background-color: -color-bg-subtle; -fx-padding: 10px; -fx-background-radius: 6px;">
+                            <Label text="Ajuste Fino dos Marcadores de Tempo:" style="-fx-font-weight: bold; -fx-font-size: 11px;" />
+                            <HBox spacing="8.0" alignment="CENTER_LEFT">
+                                <Label text="Início:" prefWidth="45.0" />
+                                <Label fx:id="lblStartSeconds" text="0.0s" style="-fx-font-weight: bold;" prefWidth="55.0" />
+                                <Button text="-1s" onAction="#onAdjustStartMinus1" />
+                                <Button text="+1s" onAction="#onAdjustStartPlus1" />
+                                <Button text="📍 Definir Início Aqui" onAction="#onSetStartCurrent" styleClass="accent" />
+                            </HBox>
+                            <HBox spacing="8.0" alignment="CENTER_LEFT">
+                                <Label text="Fim:" prefWidth="45.0" />
+                                <Label fx:id="lblEndSeconds" text="0.0s" style="-fx-font-weight: bold;" prefWidth="55.0" />
+                                <Button text="-1s" onAction="#onAdjustEndMinus1" />
+                                <Button text="+1s" onAction="#onAdjustEndPlus1" />
+                                <Button text="📍 Definir Fim Aqui" onAction="#onSetEndCurrent" styleClass="accent" />
+                            </HBox>
+                        </VBox>
+                    </VBox>
+                </SplitPane>
             </Tab>
 
             <!-- TAB 3: CONFIGURAÇÕES & DIAGNÓSTICO -->

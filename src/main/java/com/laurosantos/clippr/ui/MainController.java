@@ -16,7 +16,11 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.fxml.FXML;
 import javafx.scene.control.*;
+import javafx.scene.media.Media;
+import javafx.scene.media.MediaPlayer;
+import javafx.scene.media.MediaView;
 import javafx.stage.DirectoryChooser;
+import javafx.util.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,6 +62,16 @@ public class MainController {
     @FXML private TableColumn<ClipCandidate, String> colClipOrientation;
     @FXML private TableColumn<ClipCandidate, String> colClipStatus;
 
+    // Player de Vídeo e Ajuste Fino
+    @FXML private MediaView mediaView;
+    @FXML private Label playerPlaceholderLabel;
+    @FXML private Slider timeSlider;
+    @FXML private Label timeLabel;
+    @FXML private Button btnPlayPause;
+    @FXML private Slider volumeSlider;
+    @FXML private Label lblStartSeconds;
+    @FXML private Label lblEndSeconds;
+
     @FXML private PasswordField geminiApiKeyField;
     @FXML private TextField outputDirField;
 
@@ -72,10 +86,15 @@ public class MainController {
     private final EventBus eventBus = EventBus.getInstance();
     private final ClipprPipelineService pipelineService = ClipprPipelineService.getInstance();
 
+    private MediaPlayer mediaPlayer;
+    private ClipCandidate currentPreviewClip;
+    private boolean isSeeking = false;
+
     @FXML
     private void initialize() {
         setupTableColumns();
         setupOrientationComboBox();
+        setupPlayerSelectionListener();
         loadSettings();
         registerEventBusListeners();
         checkEnvironmentDiagnostics();
@@ -111,6 +130,237 @@ public class MainController {
     private void setupOrientationComboBox() {
         comboOrientation.setItems(FXCollections.observableArrayList(OrientationMode.values()));
         comboOrientation.setValue(OrientationMode.AUTO);
+    }
+
+    private void setupPlayerSelectionListener() {
+        clipTableView.getSelectionModel().selectedItemProperty().addListener((_, _, selected) -> {
+            if (selected != null) {
+                loadClipInPlayer(selected);
+            }
+        });
+
+        timeSlider.valueChangingProperty().addListener((_, _, changing) -> {
+            isSeeking = changing;
+            if (!changing && mediaPlayer != null) {
+                mediaPlayer.seek(Duration.seconds(timeSlider.getValue()));
+            }
+        });
+
+        timeSlider.setOnMouseClicked(_ -> {
+            if (mediaPlayer != null) {
+                mediaPlayer.seek(Duration.seconds(timeSlider.getValue()));
+            }
+        });
+    }
+
+    private void loadClipInPlayer(ClipCandidate clip) {
+        this.currentPreviewClip = clip;
+        lblStartSeconds.setText(String.format("%.1fs", clip.startSeconds()));
+        lblEndSeconds.setText(String.format("%.1fs", clip.endSeconds()));
+
+        disposeMediaPlayer();
+
+        // 1. Tenta carregar o clipe já renderizado
+        if (clip.outputFilePath() != null && Files.exists(Path.of(clip.outputFilePath()))) {
+            playMediaFile(new File(clip.outputFilePath()), 0.0, clip.durationSeconds());
+            playerPlaceholderLabel.setVisible(false);
+            return;
+        }
+
+        // 2. Se não renderizado, tenta carregar o vídeo fonte original
+        VideoSource source = findSourceForClip(clip);
+        if (source != null) {
+            Path candidateSourceVideo = Path.of("temp", "videos", "%s.mp4".formatted(source.videoId()));
+            if (Files.exists(candidateSourceVideo)) {
+                playMediaFile(candidateSourceVideo.toFile(), clip.startSeconds(), clip.endSeconds());
+                playerPlaceholderLabel.setVisible(false);
+                return;
+            }
+        }
+
+        // 3. Vídeo fonte ainda não baixado
+        playerPlaceholderLabel.setText("Vídeo original ainda não baixado.\nRenderize o corte para assistir.");
+        playerPlaceholderLabel.setVisible(true);
+    }
+
+    private void playMediaFile(File videoFile, double startOffsetSeconds, double endLimitSeconds) {
+        try {
+            Media media = new Media(videoFile.toURI().toString());
+            mediaPlayer = new MediaPlayer(media);
+            mediaView.setMediaPlayer(mediaPlayer);
+
+            mediaPlayer.setOnReady(() -> {
+                double total = media.getDuration().toSeconds();
+                timeSlider.setMin(0.0);
+                timeSlider.setMax(total);
+
+                if (startOffsetSeconds > 0) {
+                    mediaPlayer.seek(Duration.seconds(startOffsetSeconds));
+                    timeSlider.setValue(startOffsetSeconds);
+                }
+
+                updateTimeDisplay(startOffsetSeconds, total);
+                mediaPlayer.volumeProperty().bind(volumeSlider.valueProperty());
+            });
+
+            mediaPlayer.currentTimeProperty().addListener((_, _, now) -> {
+                if (now != null) {
+                    double currentSec = now.toSeconds();
+                    if (!isSeeking) {
+                        timeSlider.setValue(currentSec);
+                    }
+                    if (mediaPlayer.getTotalDuration() != null) {
+                        updateTimeDisplay(currentSec, mediaPlayer.getTotalDuration().toSeconds());
+                    }
+
+                    // Se for pré-visualização de trecho não cortado, para no final do corte
+                    if (endLimitSeconds > startOffsetSeconds && currentSec >= endLimitSeconds) {
+                        mediaPlayer.pause();
+                        mediaPlayer.seek(Duration.seconds(startOffsetSeconds));
+                        btnPlayPause.setText("▶ Play");
+                    }
+                }
+            });
+
+            mediaPlayer.setOnEndOfMedia(() -> {
+                btnPlayPause.setText("▶ Play");
+                mediaPlayer.seek(Duration.seconds(startOffsetSeconds));
+            });
+
+            btnPlayPause.setText("▶ Play");
+        } catch (Exception e) {
+            logger.error("Erro ao inicializar player de vídeo: {}", e.getMessage(), e);
+            playerPlaceholderLabel.setText("Não foi possível reproduzir o vídeo: " + e.getMessage());
+            playerPlaceholderLabel.setVisible(true);
+        }
+    }
+
+    private void updateTimeDisplay(double current, double total) {
+        timeLabel.setText(String.format("%02d:%02d / %02d:%02d",
+                (int) (current / 60), (int) (current % 60),
+                (int) (total / 60), (int) (total % 60)
+        ));
+    }
+
+    private void disposeMediaPlayer() {
+        if (mediaPlayer != null) {
+            mediaPlayer.stop();
+            mediaPlayer.dispose();
+            mediaPlayer = null;
+        }
+        btnPlayPause.setText("▶ Play");
+    }
+
+    @FXML
+    private void onTogglePlayPause() {
+        if (mediaPlayer == null) return;
+        if (mediaPlayer.getStatus() == MediaPlayer.Status.PLAYING) {
+            mediaPlayer.pause();
+            btnPlayPause.setText("▶ Play");
+        } else {
+            mediaPlayer.play();
+            btnPlayPause.setText("⏸ Pausar");
+        }
+    }
+
+    @FXML
+    private void onAdjustStartMinus1() {
+        adjustClipBounds(-1.0, 0.0);
+    }
+
+    @FXML
+    private void onAdjustStartPlus1() {
+        adjustClipBounds(1.0, 0.0);
+    }
+
+    @FXML
+    private void onSetStartCurrent() {
+        if (mediaPlayer != null && currentPreviewClip != null) {
+            double currentSec = mediaPlayer.getCurrentTime().toSeconds();
+            if (currentSec < currentPreviewClip.endSeconds()) {
+                setClipBounds(currentSec, currentPreviewClip.endSeconds());
+            }
+        }
+    }
+
+    @FXML
+    private void onAdjustEndMinus1() {
+        adjustClipBounds(0.0, -1.0);
+    }
+
+    @FXML
+    private void onAdjustEndPlus1() {
+        adjustClipBounds(0.0, 1.0);
+    }
+
+    @FXML
+    private void onSetEndCurrent() {
+        if (mediaPlayer != null && currentPreviewClip != null) {
+            double currentSec = mediaPlayer.getCurrentTime().toSeconds();
+            if (currentSec > currentPreviewClip.startSeconds()) {
+                setClipBounds(currentPreviewClip.startSeconds(), currentSec);
+            }
+        }
+    }
+
+    private void adjustClipBounds(double deltaStart, double deltaEnd) {
+        if (currentPreviewClip == null) return;
+        double newStart = Math.max(0, currentPreviewClip.startSeconds() + deltaStart);
+        double newEnd = Math.max(newStart + 1.0, currentPreviewClip.endSeconds() + deltaEnd);
+        setClipBounds(newStart, newEnd);
+    }
+
+    private void setClipBounds(double start, double end) {
+        if (currentPreviewClip == null) return;
+        ClipCandidate updated = currentPreviewClip.withBounds(start, end);
+        currentPreviewClip = updated;
+
+        lblStartSeconds.setText(String.format("%.1fs", start));
+        lblEndSeconds.setText(String.format("%.1fs", end));
+
+        // Atualiza na lista observável
+        for (int i = 0; i < clipList.size(); i++) {
+            if (clipList.get(i).id() != null && clipList.get(i).id().equals(updated.id())) {
+                clipList.set(i, updated);
+                break;
+            }
+        }
+
+        // Persiste no banco de dados
+        Thread.ofVirtual().start(() -> {
+            db.updateClipTimeBounds(updated.id(), start, end);
+        });
+
+        logMessage("Marcadores de tempo atualizados: %.1fs -> %.1fs".formatted(start, end), false);
+    }
+
+    @FXML
+    private void onRenderSelectedClip() {
+        ClipCandidate selected = clipTableView.getSelectionModel().getSelectedItem();
+        if (selected == null) {
+            showAlert("Nenhum corte selecionado", "Selecione um corte na tabela antes de renderizar.");
+            return;
+        }
+
+        VideoSource source = findSourceForClip(selected);
+        if (source == null) {
+            showAlert("Erro", "Vídeo de origem não encontrado para este corte.");
+            return;
+        }
+
+        AppSettings settings = buildCurrentSettings();
+        logMessage("Renderizando corte selecionado: " + selected.title(), false);
+        pipelineService.renderClipsForSource(source, List.of(selected), settings);
+    }
+
+    private VideoSource findSourceForClip(ClipCandidate clip) {
+        if (clip.videoSourceId() == null) return null;
+        for (VideoSource vs : videoList) {
+            if (clip.videoSourceId().equals(vs.id())) {
+                return vs;
+            }
+        }
+        return null;
     }
 
     private void loadSettings() {

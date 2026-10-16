@@ -41,6 +41,24 @@ public class ClipprPipelineService {
         return isRunning.get();
     }
 
+    public Path getOrCreateVideoFile(VideoSource source) throws Exception {
+        Path existing = cachedVideoFiles.get(source.id());
+        if (existing != null && Files.exists(existing)) {
+            return existing;
+        }
+
+        Path localCandidate = Path.of("temp", "videos", "%s.mp4".formatted(source.videoId()));
+        if (Files.exists(localCandidate)) {
+            cachedVideoFiles.put(source.id(), localCandidate);
+            return localCandidate;
+        }
+
+        Path target = Files.createDirectories(Path.of("temp", "videos")).resolve("%s.mp4".formatted(source.videoId()));
+        Path downloaded = ytDlpManager.downloadFullVideo(source.url(), target, null);
+        cachedVideoFiles.put(source.id(), downloaded);
+        return downloaded;
+    }
+
     public void processVideoSource(VideoSource source, AppSettings settings) {
         Thread.ofVirtual().start(() -> {
             try {

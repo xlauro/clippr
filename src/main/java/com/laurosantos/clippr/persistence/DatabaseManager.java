@@ -158,6 +158,26 @@ public class DatabaseManager {
         }
     }
 
+    public void updateClipTimeBounds(Long clipId, double startSeconds, double endSeconds) {
+        if (!init() || clipId == null) return;
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            em.getTransaction().begin();
+            ClipEntity entity = em.find(ClipEntity.class, clipId);
+            if (entity != null) {
+                entity.setStartSeconds(startSeconds);
+                entity.setEndSeconds(endSeconds);
+                em.merge(entity);
+            }
+            em.getTransaction().commit();
+        } catch (Exception e) {
+            if (em.getTransaction().isActive()) em.getTransaction().rollback();
+            logger.error("Erro ao atualizar timestamps do clipe {}: {}", clipId, e.getMessage(), e);
+        } finally {
+            em.close();
+        }
+    }
+
     public AppSettings getSettings() {
         if (!init()) return AppSettings.defaultSettings();
         EntityManager em = entityManagerFactory.createEntityManager();

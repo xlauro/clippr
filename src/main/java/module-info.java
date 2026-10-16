@@ -22,6 +22,7 @@ module com.laurosantos.clippr {
 
     exports com.laurosantos.clippr;
     exports com.laurosantos.clippr.domain;
+    exports com.laurosantos.clippr.downloader;
     exports com.laurosantos.clippr.events;
     exports com.laurosantos.clippr.persistence;
     exports com.laurosantos.clippr.persistence.entities;

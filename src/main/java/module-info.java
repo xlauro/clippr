@@ -19,8 +19,10 @@ module com.laurosantos.clippr {
     opens com.laurosantos.clippr.ui to javafx.fxml;
     opens com.laurosantos.clippr.persistence.entities to org.hibernate.orm.core, jakarta.persistence;
     opens com.laurosantos.clippr.domain to com.fasterxml.jackson.databind;
+    opens com.laurosantos.clippr.ai to com.fasterxml.jackson.databind;
 
     exports com.laurosantos.clippr;
+    exports com.laurosantos.clippr.ai;
     exports com.laurosantos.clippr.domain;
     exports com.laurosantos.clippr.downloader;
     exports com.laurosantos.clippr.events;
